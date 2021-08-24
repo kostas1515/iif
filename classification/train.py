@@ -6,9 +6,13 @@ import torch
 import torch.utils.data
 from torch import nn
 import torchvision
+import imbalanced_dataset
 
 import presets
 import utils
+import custom
+import resnet_cifar
+import numpy as np
 
 try:
     from apex import amp
@@ -25,6 +29,20 @@ def train_one_epoch(model, criterion, optimizer, data_loader, device, epoch, pri
         'img/s', utils.SmoothedValue(window_size=10, fmt='{value}'))
 
     header = 'Epoch: [{}]'.format(epoch)
+    
+    lr_scheduler = None
+    if epoch <5:
+        warmup_factor = 1. / 1000
+        warmup_iters = min(1000, 5*len(data_loader) - 1)
+
+        lr_scheduler = utils.warmup_lr_scheduler(optimizer, warmup_iters, warmup_factor)
+        
+    if epoch ==5:
+        warmup_factor = 1. / 1000
+        warmup_iters = min(1000, len(data_loader) - 1)
+
+        lr_scheduler = utils.warmup_lr_scheduler(optimizer, warmup_iters, warmup_factor)
+        
     for image, target in metric_logger.log_every(data_loader, print_freq, header):
         start_time = time.time()
         image, target = image.to(device), target.to(device)
@@ -41,6 +59,10 @@ def train_one_epoch(model, criterion, optimizer, data_loader, device, epoch, pri
 
         acc1, acc5 = utils.accuracy(output, target, topk=(1, 5))
         batch_size = image.shape[0]
+        
+        if lr_scheduler is not None:
+            lr_scheduler.step()
+            
         metric_logger.update(
             loss=loss.item(), lr=optimizer.param_groups[0]["lr"])
         metric_logger.meters['acc1'].update(acc1.item(), n=batch_size)
@@ -59,8 +81,11 @@ def evaluate(model, criterion, data_loader, device, print_freq=100):
             target = target.to(device, non_blocking=True)
             output = model(image)
             loss = criterion(output, target)
-
-            acc1, acc5 = utils.accuracy(output, target, topk=(1, 5))
+            weights = 1
+            if  hasattr(criterion, 'iif'):
+                weights = criterion.iif[criterion.variant]
+                
+            acc1, acc5 = utils.accuracy(output*weights , target, topk=(1, 5))
             # FIXME need to take into account that the datasets
             # could have been padded in distributed setup
             batch_size = image.shape[0]
@@ -100,10 +125,14 @@ def load_data(traindir, valdir, args):
     else:
         auto_augment_policy = getattr(args, "auto_augment", None)
         random_erase_prob = getattr(args, "random_erase", 0.0)
-        dataset = torchvision.datasets.ImageFolder(
+        dataset = imbalanced_dataset.IMBALANCEImageNet(
             traindir,
-            presets.ClassificationPresetTrain(crop_size=crop_size, auto_augment_policy=auto_augment_policy,
+            imb_type=args.imb_type,
+            imb_factor=args.imb_factor,
+            rand_number=args.rand_number,
+            transform = presets.ClassificationPresetTrain(crop_size=crop_size, auto_augment_policy=auto_augment_policy,
                                               random_erase_prob=random_erase_prob))
+        print(dataset)
         if args.cache_dataset:
             print("Saving dataset_train to {}".format(cache_path))
             utils.mkdir(os.path.dirname(cache_path))
@@ -152,11 +181,17 @@ def main(args):
     device = torch.device(args.device)
 
     torch.backends.cudnn.benchmark = True
-
-    train_dir = os.path.join(args.data_path, 'train')
-    val_dir = os.path.join(args.data_path, 'val')
-    dataset, dataset_test, train_sampler, test_sampler = load_data(
-        train_dir, val_dir, args)
+    
+    if args.dset_name =="ImageNet":
+        train_dir = os.path.join(args.data_path, 'train')
+        val_dir = os.path.join(args.data_path, 'val')
+        dataset, dataset_test, train_sampler, test_sampler = load_data(
+            train_dir, val_dir, args)
+        num_classes = len(dataset.classes)
+    else:
+        dataset, dataset_test, train_sampler, test_sampler = custom.load_cifar(args)
+        num_classes = len(dataset.num_per_cls_dict)
+        
     data_loader = torch.utils.data.DataLoader(
         dataset, batch_size=args.batch_size,
         sampler=train_sampler, num_workers=args.workers, pin_memory=True)
@@ -166,12 +201,19 @@ def main(args):
         sampler=test_sampler, num_workers=args.workers, pin_memory=True)
 
     print("Creating model")
-    model = torchvision.models.__dict__[args.model](pretrained=args.pretrained)
+    try:
+        model = torchvision.models.__dict__[args.model](pretrained=args.pretrained,num_classes=num_classes)
+    except KeyError:
+        #model does not exist in pytorch load it from resnset_cifar
+        model = eval(f'resnet_cifar.{args.model}(num_classes={num_classes})')
     model.to(device)
     if args.distributed and args.sync_bn:
         model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
-
-    criterion = nn.CrossEntropyLoss()
+    
+    if (args.iif):
+        criterion = custom.IIFLoss(dataset,variant=args.iif,precomputed=args.iif_precomputed,reduction=args.reduction)
+    else:
+        criterion = nn.CrossEntropyLoss()
 
     opt_name = args.opt.lower()
     if opt_name == 'sgd':
@@ -188,9 +230,9 @@ def main(args):
         model, optimizer = amp.initialize(model, optimizer,
                                           opt_level=args.apex_opt_level
                                           )
-
-    lr_scheduler = torch.optim.lr_scheduler.StepLR(
-        optimizer, step_size=args.lr_step_size, gamma=args.lr_gamma)
+        
+    lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(
+        optimizer, milestones=args.milestones, gamma=args.lr_gamma)
 
     model_without_ddp = model
     if args.distributed:
@@ -208,10 +250,21 @@ def main(args):
     if args.test_only:
         evaluate(model, criterion, data_loader_test, device=device)
         return
-
+    
+    cls_num_list = dataset.get_cls_num_list()
     print("Start training")
     start_time = time.time()
     for epoch in range(args.start_epoch, args.epochs):
+#         #scheduling
+#         if epoch>159:
+#             per_cls_weights = torch.tensor(cls_num_list,device='cuda')
+#             per_cls_weights = per_cls_weights.sum()/per_cls_weights
+#             per_cls_weights /=per_cls_weights.sum()
+#             if (args.iif):
+#                 criterion = custom.IIFLoss(dataset,variant=args.iif,precomputed=args.iif_precomputed,reduction=args.reduction,weight=per_cls_weights)
+#             else:
+#                 criterion = nn.CrossEntropyLoss(weight=per_cls_weights)
+        
         if args.distributed:
             train_sampler.set_epoch(epoch)
         train_one_epoch(model, criterion, optimizer, data_loader,
@@ -243,7 +296,12 @@ def get_args_parser(add_help=True):
         description='PyTorch Classification Training', add_help=add_help)
 
     parser.add_argument(
-        '--data-path', default='/datasets01/imagenet_full_size/061417/', help='dataset')
+        '--data-path', default='../../../datasets/ILSVRC/Data/CLS-LOC/', help='dataset')
+    parser.add_argument(
+        '--dset_name', default='ImageNet', help='dataset name')
+    parser.add_argument('--rand_number', default=0, type=int, help='fix random number for data sampling')
+    parser.add_argument('--imb_type', default="exp", type=str, help='imbalance type')
+    parser.add_argument('--imb_factor', default=0.01, type=float, help='imbalance factor')
     parser.add_argument('--model', default='resnet18', help='model')
     parser.add_argument('--device', default='cuda', help='device')
     parser.add_argument('-b', '--batch-size', default=32, type=int)
@@ -259,14 +317,17 @@ def get_args_parser(add_help=True):
     parser.add_argument('--wd', '--weight-decay', default=1e-4, type=float,
                         metavar='W', help='weight decay (default: 1e-4)',
                         dest='weight_decay')
-    parser.add_argument('--lr-step-size', default=30, type=int,
+    parser.add_argument('--milestones',nargs='+', default=[160,180],type=int,
                         help='decrease lr every step-size epochs')
     parser.add_argument('--lr-gamma', default=0.1, type=float,
                         help='decrease lr by a factor of lr-gamma')
-    parser.add_argument('--print-freq', default=10,
+    parser.add_argument('--print-freq', default=100,
                         type=int, help='print frequency')
     parser.add_argument('--output-dir', default='.', help='path where to save')
     parser.add_argument('--resume', default='', help='resume from checkpoint')
+    parser.add_argument('--iif', default=None, help='IIF variant')
+    parser.add_argument('--iif_precomputed', default=True, type=bool, help='IIF variant')
+    parser.add_argument('--reduction', default='mean', type=str, help='reduce mini batch')
     parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
                         help='start epoch')
     parser.add_argument(

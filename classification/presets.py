@@ -1,5 +1,7 @@
-from torchvision.transforms import autoaugment, transforms
-
+# from torchvision.transforms import autoaugment, transforms
+from torchvision.transforms import transforms
+import numpy as np
+import torch
 
 class ClassificationPresetTrain:
     def __init__(self, crop_size, mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225), hflip_prob=0.5,
@@ -7,9 +9,9 @@ class ClassificationPresetTrain:
         trans = [transforms.RandomResizedCrop(crop_size)]
         if hflip_prob > 0:
             trans.append(transforms.RandomHorizontalFlip(hflip_prob))
-        if auto_augment_policy is not None:
-            aa_policy = autoaugment.AutoAugmentPolicy(auto_augment_policy)
-            trans.append(autoaugment.AutoAugment(policy=aa_policy))
+#         if auto_augment_policy is not None:
+#             aa_policy = autoaugment.AutoAugmentPolicy(auto_augment_policy)
+#             trans.append(autoaugment.AutoAugment(policy=aa_policy))
         trans.extend([
             transforms.ToTensor(),
             transforms.Normalize(mean=mean, std=std),
@@ -35,3 +37,4 @@ class ClassificationPresetEval:
 
     def __call__(self, img):
         return self.transforms(img)
+    
