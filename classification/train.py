@@ -13,6 +13,8 @@ import utils
 import custom
 import resnet_cifar
 import numpy as np
+from sklearn.feature_selection import chi2,mutual_info_classif,f_classif
+from sklearn.feature_selection import SelectKBest
 
 try:
     from apex import amp
@@ -80,16 +82,15 @@ def evaluate(model, criterion, data_loader, device, print_freq=100):
             image = image.to(device, non_blocking=True)
             target = target.to(device, non_blocking=True)
             output = model(image)
-            loss = criterion(output, target)
+#             loss = criterion(output, target)
             weights = 1
             if  hasattr(criterion, 'iif'):
-                weights = criterion.iif[criterion.variant]
-                
-            acc1, acc5 = utils.accuracy(output*weights , target, topk=(1, 5))
+                weights = criterion.iif[criterion.variant]                
+            acc1, acc5 = utils.accuracy(output+weights , target, topk=(1, 5))
             # FIXME need to take into account that the datasets
             # could have been padded in distributed setup
             batch_size = image.shape[0]
-            metric_logger.update(loss=loss.item())
+#             metric_logger.update(loss=loss.item())
             metric_logger.meters['acc1'].update(acc1.item(), n=batch_size)
             metric_logger.meters['acc5'].update(acc5.item(), n=batch_size)
     # gather the stats from all processes
@@ -210,8 +211,39 @@ def main(args):
     if args.distributed and args.sync_bn:
         model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
     
-    if (args.iif):
-        criterion = custom.IIFLoss(dataset,variant=args.iif,precomputed=args.iif_precomputed,reduction=args.reduction)
+    if (args.classif== 'iif'):
+        per_cls_weights = torch.tensor(dataset.get_cls_num_list(),device='cuda')
+        per_cls_weights = per_cls_weights.sum()/per_cls_weights
+        per_cls_weights /=per_cls_weights.sum()
+        criterion = custom.IIFLoss(dataset,variant=args.iif,iif_norm=args.iif_norm,reduction=args.reduction,weight=per_cls_weights)
+    elif (args.classif== 'gombit'):
+        criterion = custom.GombitLoss(dataset,reduction=args.reduction)
+        torch.nn.init.constant_(model.linear.bias.data,np.log(np.log(1+1/(num_classes-1))))
+        torch.nn.init.normal_(model.linear.weight.data,0.0,0.001)
+    elif (args.classif== 'bce'):
+#         per_cls_weights = torch.tensor(dataset.get_cls_num_list(),device='cuda')
+#         per_cls_weights = per_cls_weights.sum()/per_cls_weights
+#         per_cls_weights /=per_cls_weights.sum()
+        criterion = custom.FocalLoss(gamma=0,reduction=args.reduction,feat_select=args.feat_select)
+    elif (args.classif== 'focal_loss'):
+#         per_cls_weights = torch.tensor(dataset.get_cls_num_list(),device='cuda')
+#         per_cls_weights = per_cls_weights.sum()/per_cls_weights
+#         per_cls_weights /=per_cls_weights.sum()
+        criterion = custom.FocalLoss(gamma=args.gamma,alpha=args.alpha,reduction=args.reduction,feat_select=args.feat_select)
+    elif (args.classif== 'ce_loss'):
+        per_cls_weights = torch.tensor(dataset.get_cls_num_list(),device='cuda')
+        per_cls_weights = per_cls_weights.sum()/per_cls_weights
+#         per_cls_weights = per_cls_weights/torch.norm(per_cls_weights,p=2)
+        if torch.cuda.current_device()==0:
+            criterion = custom.CELoss(feat_select='entropy',weights=per_cls_weights)
+        elif torch.cuda.current_device()==1:
+            criterion = custom.CELoss(feat_select='mutual_info_classif',weights=per_cls_weights)
+        elif torch.cuda.current_device()==2:
+            per_cls_weights = per_cls_weights/torch.norm(per_cls_weights,p=2)
+            criterion = custom.CELoss(feat_select='f_classif',weights=per_cls_weights)
+        else:
+            per_cls_weights = per_cls_weights/torch.norm(per_cls_weights,p=2)
+            criterion = custom.CELoss(feat_select='chi2',weights=per_cls_weights)
     else:
         criterion = nn.CrossEntropyLoss()
 
@@ -254,6 +286,7 @@ def main(args):
     cls_num_list = dataset.get_cls_num_list()
     print("Start training")
     start_time = time.time()
+    best_acc = 0
     for epoch in range(args.start_epoch, args.epochs):
 #         #scheduling
 #         if epoch>159:
@@ -264,13 +297,21 @@ def main(args):
 #                 criterion = custom.IIFLoss(dataset,variant=args.iif,precomputed=args.iif_precomputed,reduction=args.reduction,weight=per_cls_weights)
 #             else:
 #                 criterion = nn.CrossEntropyLoss(weight=per_cls_weights)
+#         if epoch>159:
+# #             per_cls_weights = torch.tensor(cls_num_list,device='cuda')
+# #             per_cls_weights = per_cls_weights.sum()/per_cls_weights
+# #             per_cls_weights /=per_cls_weights.sum()
+#             criterion = custom.IIFLoss(dataset,variant=args.iif,reduction=args.reduction,weight=per_cls_weights)
+        
         
         if args.distributed:
             train_sampler.set_epoch(epoch)
         train_one_epoch(model, criterion, optimizer, data_loader,
                         device, epoch, args.print_freq, args.apex)
         lr_scheduler.step()
-        evaluate(model, criterion, data_loader_test, device=device)
+        acc = evaluate(model, criterion, data_loader_test, device=device)
+        if acc>best_acc:
+            best_acc = acc
         if args.output_dir:
             checkpoint = {
                 'model': model_without_ddp.state_dict(),
@@ -288,6 +329,7 @@ def main(args):
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
     print('Training time {}'.format(total_time_str))
+    print('best acc is:',best_acc)
 
 
 def get_args_parser(add_help=True):
@@ -325,8 +367,12 @@ def get_args_parser(add_help=True):
                         type=int, help='print frequency')
     parser.add_argument('--output-dir', default='.', help='path where to save')
     parser.add_argument('--resume', default='', help='resume from checkpoint')
-    parser.add_argument('--iif', default=None, help='IIF variant')
-    parser.add_argument('--iif_precomputed', default=True, type=bool, help='IIF variant')
+    parser.add_argument('--classif', default='ce',type=str, help='Type of classification')
+    parser.add_argument('--gamma', default=2.0,type=float, help='Focal loss gamma hp')
+    parser.add_argument('--alpha', default=None,type=float, help='Focal loss alpha hp')
+    parser.add_argument('--iif', default='raw',type=str, help='Type of IIF variant')
+    parser.add_argument('--iif_norm', default=0, type=int, help='IIF norm')
+    parser.add_argument('--feat_select', default=None, type=str, help='pick either chi2 or mutual_info_classif')
     parser.add_argument('--reduction', default='mean', type=str, help='reduce mini batch')
     parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
                         help='start epoch')

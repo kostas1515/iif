@@ -177,6 +177,7 @@ def accuracy(output, target, topk=(1,)):
             correct_k = correct[:k].flatten().sum(dtype=torch.float32)
             res.append(correct_k * (100.0 / batch_size))
         return res
+    
 
 def warmup_lr_scheduler(optimizer, warmup_iters, warmup_factor):
     def f(x):
