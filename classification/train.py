@@ -15,6 +15,7 @@ import resnet_cifar
 import numpy as np
 from sklearn.feature_selection import chi2,mutual_info_classif,f_classif
 from sklearn.feature_selection import SelectKBest
+from custom import LinearCombine
 
 try:
     from apex import amp
@@ -22,8 +23,10 @@ except ImportError:
     amp = None
 
 
-def train_one_epoch(model, criterion, optimizer, data_loader, device, epoch, print_freq, apex=False):
+def train_one_epoch(model, criterion, optimizer, data_loader, device, epoch, args):
     model.train()
+    print_freq=args.print_freq
+    apex=args.apex
     metric_logger = utils.MetricLogger(delimiter="  ")
     metric_logger.add_meter(
         'lr', utils.SmoothedValue(window_size=1, fmt='{value}'))
@@ -44,13 +47,15 @@ def train_one_epoch(model, criterion, optimizer, data_loader, device, epoch, pri
         warmup_iters = min(1000, len(data_loader) - 1)
 
         lr_scheduler = utils.warmup_lr_scheduler(optimizer, warmup_iters, warmup_factor)
-        
+    
+    lincomb=LinearCombine(len(data_loader.dataset.classes))
     for image, target in metric_logger.log_every(data_loader, print_freq, header):
         start_time = time.time()
         image, target = image.to(device), target.to(device)
+        if args.schedule=='lincomb':
+            image, target=lincomb(image, target)
         output = model(image)
         loss = criterion(output, target)
-
         optimizer.zero_grad()
         if apex:
             with amp.scale_loss(loss, optimizer) as scaled_loss:
@@ -58,7 +63,7 @@ def train_one_epoch(model, criterion, optimizer, data_loader, device, epoch, pri
         else:
             loss.backward()
         optimizer.step()
-
+        
         acc1, acc5 = utils.accuracy(output, target, topk=(1, 5))
         batch_size = image.shape[0]
         
@@ -86,7 +91,7 @@ def evaluate(model, criterion, data_loader, device, print_freq=100):
             weights = 1
             if  hasattr(criterion, 'iif'):
                 weights = criterion.iif[criterion.variant]                
-            acc1, acc5 = utils.accuracy(output+weights , target, topk=(1, 5))
+            acc1, acc5 = utils.accuracy(output*weights , target, topk=(1, 5))
             # FIXME need to take into account that the datasets
             # could have been padded in distributed setup
             batch_size = image.shape[0]
@@ -234,16 +239,7 @@ def main(args):
         per_cls_weights = torch.tensor(dataset.get_cls_num_list(),device='cuda')
         per_cls_weights = per_cls_weights.sum()/per_cls_weights
 #         per_cls_weights = per_cls_weights/torch.norm(per_cls_weights,p=2)
-        if torch.cuda.current_device()==0:
-            criterion = custom.CELoss(feat_select='entropy',weights=per_cls_weights)
-        elif torch.cuda.current_device()==1:
-            criterion = custom.CELoss(feat_select='mutual_info_classif',weights=per_cls_weights)
-        elif torch.cuda.current_device()==2:
-            per_cls_weights = per_cls_weights/torch.norm(per_cls_weights,p=2)
-            criterion = custom.CELoss(feat_select='f_classif',weights=per_cls_weights)
-        else:
-            per_cls_weights = per_cls_weights/torch.norm(per_cls_weights,p=2)
-            criterion = custom.CELoss(feat_select='chi2',weights=per_cls_weights)
+        criterion = custom.CELoss(feat_select=args.feat_select,weights=per_cls_weights)
     else:
         criterion = nn.CrossEntropyLoss()
 
@@ -288,26 +284,24 @@ def main(args):
     start_time = time.time()
     best_acc = 0
     for epoch in range(args.start_epoch, args.epochs):
-#         #scheduling
-#         if epoch>159:
-#             per_cls_weights = torch.tensor(cls_num_list,device='cuda')
-#             per_cls_weights = per_cls_weights.sum()/per_cls_weights
-#             per_cls_weights /=per_cls_weights.sum()
-#             if (args.iif):
-#                 criterion = custom.IIFLoss(dataset,variant=args.iif,precomputed=args.iif_precomputed,reduction=args.reduction,weight=per_cls_weights)
-#             else:
-#                 criterion = nn.CrossEntropyLoss(weight=per_cls_weights)
-#         if epoch>159:
-# #             per_cls_weights = torch.tensor(cls_num_list,device='cuda')
-# #             per_cls_weights = per_cls_weights.sum()/per_cls_weights
-# #             per_cls_weights /=per_cls_weights.sum()
-#             criterion = custom.IIFLoss(dataset,variant=args.iif,reduction=args.reduction,weight=per_cls_weights)
-        
+        if (epoch>159):
+            if args.schedule=='lincomb':
+                args.schedule='cost'
+        if epoch>179:
+            if args.schedule=='cost':
+                per_cls_weights = torch.tensor(dataset.get_cls_num_list(),device='cuda')
+                per_cls_weights = per_cls_weights.sum()/per_cls_weights
+                criterion = custom.CELoss(feat_select=args.feat_select,weights=per_cls_weights) 
+            elif args.schedule=='iif':
+#                 per_cls_weights = torch.tensor(dataset.get_cls_num_list(),device='cuda')
+#                 per_cls_weights = per_cls_weights.sum()/per_cls_weights
+                criterion = custom.IIFLoss(dataset,variant=args.iif,iif_norm=args.iif_norm,reduction=args.reduction)
+                
         
         if args.distributed:
             train_sampler.set_epoch(epoch)
         train_one_epoch(model, criterion, optimizer, data_loader,
-                        device, epoch, args.print_freq, args.apex)
+                        device, epoch, args)
         lr_scheduler.step()
         acc = evaluate(model, criterion, data_loader_test, device=device)
         if acc>best_acc:
@@ -349,7 +343,7 @@ def get_args_parser(add_help=True):
     parser.add_argument('-b', '--batch-size', default=32, type=int)
     parser.add_argument('--epochs', default=90, type=int, metavar='N',
                         help='number of total epochs to run')
-    parser.add_argument('-j', '--workers', default=16, type=int, metavar='N',
+    parser.add_argument('-j', '--workers', default=4, type=int, metavar='N',
                         help='number of data loading workers (default: 16)')
     parser.add_argument('--opt', default='sgd', type=str, help='optimizer')
     parser.add_argument('--lr', default=0.1, type=float,
@@ -373,6 +367,7 @@ def get_args_parser(add_help=True):
     parser.add_argument('--iif', default='raw',type=str, help='Type of IIF variant')
     parser.add_argument('--iif_norm', default=0, type=int, help='IIF norm')
     parser.add_argument('--feat_select', default=None, type=str, help='pick either chi2 or mutual_info_classif')
+    parser.add_argument('--schedule', default='normal', type=str, help='strategy of loss functions')
     parser.add_argument('--reduction', default='mean', type=str, help='reduce mini batch')
     parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
                         help='start epoch')

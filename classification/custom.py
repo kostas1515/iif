@@ -15,7 +15,8 @@ class IIFLoss(nn.Module):
     # BCEwithLogitLoss() with reduced missing label effects.
     def __init__(self,dataset,variant='raw',iif_norm=0,reduction='mean',device='cuda',weight=None):
         super(IIFLoss, self).__init__()
-        self.loss_fcn = nn.CrossEntropyLoss(reduction=reduction,weight=weight)
+        self.loss_fcn = nn.CrossEntropyLoss(reduction='none',weight=weight)
+        self.reduction=reduction
 #         self.loss_fcn = nn.MultiMarginLoss(reduction=reduction,weight=weight)
         self.variant = variant
         freqs = np.array(list(dataset.num_per_cls_dict.values()))
@@ -31,10 +32,14 @@ class IIFLoss(nn.Module):
         self.iif = {k: torch.tensor([v],dtype=torch.float).to(device,non_blocking=True) for k, v in iif.items()}
         if iif_norm >0:
             self.iif = {k: v/torch.norm(v,p=iif_norm)  for k, v in self.iif.items()}
-        print(self.iif[self.variant])
+#         print(self.iif[self.variant])
         
     def forward(self, pred, targets):
         loss = self.loss_fcn(pred*self.iif[self.variant],targets)
+        if self.reduction=='mean':
+            loss=loss.mean()
+        elif self.reduction=='sum':
+            loss=loss.sum()
         return loss
     
 class GombitLoss(nn.Module):
@@ -94,7 +99,6 @@ class CELoss(nn.Module):
 #                 weights /=torch.norm(weights,2) 
         else:
             selector_scores = 1
-        
         loss =  self.loss_fn(selector_scores*pred,targets)
         if self.reduction=='mean':
             loss=loss.mean()
@@ -205,5 +209,45 @@ def load_cifar(args):
         test_sampler = torch.utils.data.SequentialSampler(val_dataset)
 
     return train_dataset, val_dataset, train_sampler, test_sampler
+
+class LinearCombine(object):
+    """Mix images
+
+    Args:
+        output_size (tuple or int): Desired output size. If int, square crop
+            is made.
+    """
+
+    def __init__(self,num_classes,increase_factor=1):
+        self.increase_factor=increase_factor
+        self.num_classes=num_classes
+    
+
+    def __call__(self, image,target):
+        new_images=[]
+        new_targets=[]
+        increase_factor=self.increase_factor
+        batch_targets=[torch.zeros_like(target) for _ in range(dist.get_world_size())]
+        batch_images=[torch.zeros_like(image) for _ in range(dist.get_world_size())]
+        dist.all_gather(batch_targets,target)
+        dist.all_gather(batch_images,image)
+        batch_targets=torch.cat(batch_targets,axis=0)
+        batch_images=torch.cat(batch_images,axis=0)
+        for i in range(self.num_classes):
+            mask  = batch_targets==i
+            images2blend  = batch_images[mask]
+            group_size=images2blend.shape[0]
+            if group_size>1:
+                repeat = int(group_size*increase_factor)
+                for j in range(repeat):
+                    weights=torch.rand(group_size,1,1,1)
+                    weights=weights.cuda()
+                    new_images.append((images2blend*weights).sum(axis=0))
+                    new_targets.append(i)
+        new_targets=torch.tensor(new_targets,device='cuda',dtype=torch.long)
+        new_images = torch.stack(new_images,axis=0)
+        final_images=torch.cat([new_images,image],axis=0)
+        final_targets=torch.cat([new_targets,target],axis=0)
+        return final_images,final_targets
 
 
