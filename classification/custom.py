@@ -10,6 +10,7 @@ from scipy.special import ndtri
 from sklearn.feature_selection import chi2,mutual_info_classif,f_classif
 from sklearn.feature_selection import SelectKBest
 import torch.distributed as dist
+from catalyst.data import  BalanceClassSampler,DistributedSamplerWrapper
 
 class IIFLoss(nn.Module):
     # BCEwithLogitLoss() with reduced missing label effects.
@@ -200,12 +201,22 @@ def load_cifar(args):
 
     print("Creating data loaders")
     if args.distributed:
-        train_sampler = torch.utils.data.distributed.DistributedSampler(
-            train_dataset)
+        if args.sampler=='random':
+            train_sampler = torch.utils.data.distributed.DistributedSampler(
+                train_dataset)
+        else:
+            train_labels = train_dataset.targets
+            balanced_sampler = BalanceClassSampler(train_labels,mode=args.sampler)
+            train_sampler= DistributedSamplerWrapper(balanced_sampler)
+
         test_sampler = torch.utils.data.distributed.DistributedSampler(
             val_dataset)
     else:
-        train_sampler = torch.utils.data.RandomSampler(train_dataset)
+        if args.sampler=='random':
+            train_sampler = torch.utils.data.RandomSampler(train_dataset)
+        else:
+            train_labels = train_dataset.targets
+            train_sampler = BalanceClassSampler(train_labels,mode=args.sampler)
         test_sampler = torch.utils.data.SequentialSampler(val_dataset)
 
     return train_dataset, val_dataset, train_sampler, test_sampler

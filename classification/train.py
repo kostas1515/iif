@@ -368,6 +368,7 @@ def get_args_parser(add_help=True):
     parser.add_argument('--iif_norm', default=0, type=int, help='IIF norm')
     parser.add_argument('--feat_select', default=None, type=str, help='pick either chi2 or mutual_info_classif')
     parser.add_argument('--schedule', default='normal', type=str, help='strategy of loss functions')
+    parser.add_argument('--sampler', default='random', type=str, help='sampling, [random,upsampling,downsampling]')
     parser.add_argument('--reduction', default='mean', type=str, help='reduce mini batch')
     parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
                         help='start epoch')
