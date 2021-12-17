@@ -48,7 +48,7 @@ def train_one_epoch(model, criterion, optimizer, data_loader, device, epoch, arg
 
         lr_scheduler = utils.warmup_lr_scheduler(optimizer, warmup_iters, warmup_factor)
     
-    lincomb=LinearCombine(len(data_loader.dataset.classes))
+    lincomb=LinearCombine(len(data_loader.dataset.classes),increase_factor=args.lincomb_if)
     for image, target in metric_logger.log_every(data_loader, print_freq, header):
         start_time = time.time()
         image, target = image.to(device), target.to(device)
@@ -226,33 +226,54 @@ def main(args):
         # per_cls_weights /=per_cls_weights.sum()
         criterion = custom.IIFLoss(dataset,variant=args.iif,iif_norm=args.iif_norm,reduction=args.reduction,weight=None)
     elif (args.classif== 'gombit'):
-        criterion = custom.GombitLoss(dataset,reduction=args.reduction)
-        torch.nn.init.constant_(model.linear.bias.data,np.log(np.log(1+1/(num_classes-1))))
+#         per_cls_weights = torch.tensor(dataset.get_cls_num_list(),device='cuda')
+#         per_cls_weights = per_cls_weights.sum()/per_cls_weights
+        criterion = custom.GombitLoss(len(dataset.classes),reduction=args.reduction)
+#         torch.nn.init.constant_(model.linear.bias.data,np.log(np.log(1+1/(num_classes-1))))
+        torch.nn.init.constant_(model.linear.bias.data,-np.log(np.log(num_classes)))
         torch.nn.init.normal_(model.linear.weight.data,0.0,0.001)
     elif (args.classif== 'bce'):
 #         per_cls_weights = torch.tensor(dataset.get_cls_num_list(),device='cuda')
 #         per_cls_weights = per_cls_weights.sum()/per_cls_weights
 #         per_cls_weights /=per_cls_weights.sum()
         criterion = custom.FocalLoss(gamma=0,reduction=args.reduction,feat_select=args.feat_select)
+        torch.nn.init.constant_(model.linear.bias.data,-6.5)
+        torch.nn.init.normal_(model.linear.weight.data,0.0,0.001)
     elif (args.classif== 'focal_loss'):
 #         per_cls_weights = torch.tensor(dataset.get_cls_num_list(),device='cuda')
 #         per_cls_weights = per_cls_weights.sum()/per_cls_weights
 #         per_cls_weights /=per_cls_weights.sum()
         criterion = custom.FocalLoss(gamma=args.gamma,alpha=args.alpha,reduction=args.reduction,feat_select=args.feat_select)
+        torch.nn.init.constant_(model.linear.bias.data,-6.5)
+        torch.nn.init.normal_(model.linear.weight.data,0.0,0.001)
     elif (args.classif== 'ce_loss'):
         per_cls_weights = torch.tensor(dataset.get_cls_num_list(),device='cuda')
         per_cls_weights = per_cls_weights.sum()/per_cls_weights
 #         per_cls_weights = per_cls_weights/torch.norm(per_cls_weights,p=2)
         criterion = custom.CELoss(feat_select=args.feat_select,weights=per_cls_weights)
+    elif (args.classif== 'gaussian'):
+#         per_cls_weights = torch.tensor(dataset.get_cls_num_list(),device='cuda')
+#         per_cls_weights = per_cls_weights.sum()/per_cls_weights
+        criterion = custom.GaussianLoss(len(dataset.classes),reduction=args.reduction)
+        torch.nn.init.constant_(model.linear.bias.data,-2)
+        torch.nn.init.normal_(model.linear.weight.data,0.0,0.001)
+    elif (args.classif== 'multiactivation'):
+        criterion = custom.MultiActivationLoss(len(dataset.classes),reduction=args.reduction)
+        torch.nn.init.constant_(model.linear.bias.data,-2)
+        torch.nn.init.normal_(model.linear.weight.data,0.0,0.001)
     else:
         criterion = nn.CrossEntropyLoss()
 
     opt_name = args.opt.lower()
+    if (args.classif== 'multiactivation'):
+        model_parameters=list(model.parameters())+list(criterion.parameters())
+    else: 
+        model_parameters=model.parameters()
     if opt_name == 'sgd':
         optimizer = torch.optim.SGD(
-            model.parameters(), lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
+            model_parameters, lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
     elif opt_name == 'rmsprop':
-        optimizer = torch.optim.RMSprop(model.parameters(), lr=args.lr, momentum=args.momentum,
+        optimizer = torch.optim.RMSprop(model_parameters, lr=args.lr, momentum=args.momentum,
                                         weight_decay=args.weight_decay, eps=0.0316, alpha=0.9)
     else:
         raise RuntimeError(
@@ -302,7 +323,11 @@ def main(args):
             if args.schedule=='cost':
                 per_cls_weights = torch.tensor(dataset.get_cls_num_list(),device='cuda')
                 per_cls_weights = per_cls_weights.sum()/per_cls_weights
-                criterion = custom.CELoss(feat_select=args.feat_select,weights=per_cls_weights) 
+                if args.classif=='ce':
+                    criterion = custom.CELoss(feat_select=args.feat_select,weights=per_cls_weights) 
+                else:
+                    criterion.set_weights(per_cls_weights)
+                    
             elif args.schedule=='iif':
 #                 per_cls_weights = torch.tensor(dataset.get_cls_num_list(),device='cuda')
 #                 per_cls_weights = per_cls_weights.sum()/per_cls_weights
@@ -381,6 +406,7 @@ def get_args_parser(add_help=True):
     parser.add_argument('--iif_norm', default=0, type=int, help='IIF norm')
     parser.add_argument('--feat_select', default=None, type=str, help='pick either chi2 or mutual_info_classif')
     parser.add_argument('--schedule', default='normal', type=str, help='strategy of loss functions')
+    parser.add_argument('--lincomb_if', default=1.0, type=float, help='LinearCombination factor, applicable if schedule:lincomb')
     parser.add_argument('--sampler', default='random', type=str, help='sampling, [random,upsampling,downsampling]')
     parser.add_argument('--reduction', default='mean', type=str, help='reduce mini batch')
     parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
