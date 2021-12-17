@@ -11,6 +11,7 @@ from sklearn.feature_selection import chi2,mutual_info_classif,f_classif
 from sklearn.feature_selection import SelectKBest
 import torch.distributed as dist
 from catalyst.data import  BalanceClassSampler,DistributedSamplerWrapper
+import math
 
 class IIFLoss(nn.Module):
     # BCEwithLogitLoss() with reduced missing label effects.
@@ -20,7 +21,7 @@ class IIFLoss(nn.Module):
         self.reduction=reduction
 #         self.loss_fcn = nn.MultiMarginLoss(reduction=reduction,weight=weight)
         self.variant = variant
-        freqs = np.array(list(dataset.num_per_cls_dict.values()))
+        freqs = np.array(dataset.get_cls_num_list())
         iif={}
         iif['raw']= np.log(freqs.sum()/freqs)
         iif['smooth'] = np.log((freqs.sum()+1)/(freqs+1))+1
@@ -57,6 +58,39 @@ class GombitLoss(nn.Module):
         y_onehot.scatter_(1, targets.unsqueeze(1), 1)
         pred=torch.clamp(pred,min=-10,max=2)
         pestim=1- 1/(torch.exp(torch.exp((pred))))
+        loss =  self.loss_fn(pestim,y_onehot)
+#         loss*=self.weights
+        
+#         neg_grad = (torch.exp(pred)*(1-y_onehot)).sum()
+#         pos_grad = (torch.exp(pred)/(torch.exp(torch.exp(pred))-1))*(y_onehot)
+#         print(f'pos grad is:{pos_grad.sum()}, neg grad is:{neg_grad.sum()}')
+        if self.reduction=='mean':
+            loss=loss.mean()
+        elif self.reduction=='sum':
+            loss=loss.sum()/targets.shape[0]
+        
+        return loss
+
+class GaussianLoss(nn.Module):
+    def __init__(self,dataset,reduction='mean',device='cuda'):
+        super(GaussianLoss,self).__init__()
+        self.loss_fn = nn.BCELoss(reduction='none').to(device)
+        self.reduction=reduction
+#         freqs = torch.tensor(list(dataset.num_per_cls_dict.values()),device='cuda',dtype=torch.float)
+#         self.weights = torch.log(freqs.sum()/freqs).unsqueeze(0)
+
+    def gaussian_cdf(self,input):
+        x=input/(2**(1/2))
+        a=0.147
+        res= torch.sign(x)*(1-torch.exp(-(x**2)*((4/math.pi+a*(x**2))/(1+a*(x**2)))))**(1/2)
+        return (1+res)/2
+        
+    def forward(self, pred, targets):
+        y_onehot = torch.cuda.FloatTensor(pred.shape)
+        y_onehot.zero_()
+        y_onehot.scatter_(1, targets.unsqueeze(1), 1)
+        
+        pestim=self.gaussian_cdf(pred)
         loss =  self.loss_fn(pestim,y_onehot)
 #         loss*=self.weights
         
