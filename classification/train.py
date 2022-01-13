@@ -129,16 +129,19 @@ def _get_cache_path(filepath):
 
 
 def select_training_param(model):
-
     for v in model.parameters():
         v.requires_grad = False
-    torch.nn.init.xavier_uniform_(model.linear.weight)
-    model.linear.bias.data.fill_(0.01)
-    
-    model.linear.weight.requires_grad = True
-    model.linear.bias.requires_grad = True
-    
-
+    try:
+        torch.nn.init.xavier_uniform_(model.linear.weight)
+        model.linear.bias.data.fill_(0.01)
+        model.linear.weight.requires_grad = True
+        model.linear.bias.requires_grad = True
+    except torch.nn.modules.module.ModuleAttributeError:
+        torch.nn.init.xavier_uniform_(model.fc.weight)
+        model.fc.bias.data.fill_(0.01)
+        model.fc.weight.requires_grad = True
+        model.fc.bias.requires_grad = True
+        
     return model
 
 
