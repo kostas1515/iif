@@ -2,6 +2,10 @@ import torch
 import torchvision
 import torchvision.transforms as transforms
 import numpy as np
+import torchvision.datasets
+from torch.utils.data import Dataset
+import os
+from PIL import Image
 
 class IMBALANCECIFAR10(torchvision.datasets.CIFAR10):
     cls_num = 10
@@ -140,3 +144,123 @@ if __name__ == '__main__':
     trainloader = iter(trainset)
     data, label = next(trainloader)
     import pdb; pdb.set_trace()
+
+
+
+
+class LT_Dataset(Dataset):
+    num_classes = 1000
+
+    def __init__(self, root, txt, transform=None):
+        self.img_path = []
+        self.targets = []
+        self.transform = transform
+        with open(txt) as f:
+            for line in f:
+                self.img_path.append(os.path.join(root, line.split()[0]))
+                self.targets.append(int(line.split()[1]))
+        
+        cls_num_list_old = [np.sum(np.array(self.targets) == i) for i in range(self.num_classes)]
+        
+        # generate class_map: class index sort by num (descending)
+        sorted_classes = np.argsort(-np.array(cls_num_list_old))
+        self.class_map = [0 for i in range(self.num_classes)]
+        for i in range(self.num_classes):
+            self.class_map[sorted_classes[i]] = i
+        
+        self.targets = np.array(self.class_map)[self.targets].tolist()
+        self.classes = np.unique(np.array(self.targets))
+        self.class_data = [[] for i in range(self.num_classes)]
+        for i in range(len(self.targets)):
+            j = self.targets[i]
+            self.class_data[j].append(i)
+
+        self.cls_num_list = [np.sum(np.array(self.targets)==i) for i in range(self.num_classes)]
+
+
+    def __len__(self):
+        return len(self.targets)
+
+    def __getitem__(self, index):
+        path = self.img_path[index]
+        target = self.targets[index]
+
+        with open(path, 'rb') as f:
+            sample = Image.open(f).convert('RGB')
+        if self.transform is not None:
+            sample = self.transform(sample)
+        return sample, target
+
+    def get_cls_num_list(self):
+        return self.cls_num_list
+    
+
+
+class LT_Dataset_Eval(Dataset):
+    num_classes = 1000
+
+    def __init__(self, root, txt, class_map, transform=None):
+        self.img_path = []
+        self.targets = []
+        self.transform = transform
+        self.class_map = class_map
+        with open(txt) as f:
+            for line in f:
+                self.img_path.append(os.path.join(root, line.split()[0]))
+                self.targets.append(int(line.split()[1]))
+
+        self.targets = np.array(self.class_map)[self.targets].tolist()
+
+    def __len__(self):
+        return len(self.targets)
+
+    def __getitem__(self, index):
+        path = self.img_path[index]
+        target = self.targets[index]
+
+        with open(path, 'rb') as f:
+            sample = Image.open(f).convert('RGB')
+        if self.transform is not None:
+            sample = self.transform(sample)
+        return sample, target 
+
+
+def get_imagenet_lt(distributed, root="", batch_size=60, num_works=4):
+
+        
+    normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+    
+    transform_train = transforms.Compose([
+        transforms.RandomResizedCrop(224),
+        transforms.RandomHorizontalFlip(),
+        transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4, hue=0),
+        transforms.ToTensor(),
+        normalize,
+        ])
+    
+
+    transform_test = transforms.Compose([
+            transforms.Resize(256),
+            transforms.CenterCrop(224),
+            transforms.ToTensor(),
+            normalize,
+        ])
+
+    
+    train_txt = "../../../datasets/ImageNet-LT/ImageNet_LT_train.txt"
+    eval_txt = "../../../datasets/ImageNet-LT/ImageNet_LT_test.txt"
+    
+    train_dataset = LT_Dataset(root, train_txt, transform=transform_train)
+    eval_dataset = LT_Dataset_Eval(root, eval_txt, transform=transform_test, class_map=train_dataset.class_map)
+    
+    print("Creating data loaders")
+    if distributed:
+        train_sampler = torch.utils.data.distributed.DistributedSampler(
+            train_dataset)
+        test_sampler = torch.utils.data.distributed.DistributedSampler(
+            eval_dataset)
+    else:
+        train_sampler = torch.utils.data.RandomSampler(train_dataset)
+        test_sampler = torch.utils.data.SequentialSampler(eval_dataset)
+
+    return train_dataset, eval_dataset, train_sampler, test_sampler

@@ -220,6 +220,10 @@ def main(args):
         dataset, dataset_test, train_sampler, test_sampler = load_data(
             train_dir, val_dir, args)
         num_classes = len(dataset.classes)
+    elif args.dset_name =="imagenet_lt":
+        dataset, dataset_test, train_sampler, test_sampler = imbalanced_dataset.get_imagenet_lt(args.distributed, root=args.data_path,
+                              batch_size=args.batch_size, num_works=args.workers)
+        num_classes = len(dataset.cls_num_list)
     else:
         dataset, dataset_test, train_sampler, test_sampler = custom.load_cifar(args)
         num_classes = len(dataset.num_per_cls_dict)
@@ -243,9 +247,9 @@ def main(args):
         model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
     
     if (args.classif== 'iif'):
-        per_cls_weights = torch.tensor(dataset.get_cls_num_list(),device='cuda')
-        per_cls_weights = per_cls_weights.sum()/per_cls_weights
-        per_cls_weights /=per_cls_weights.sum()
+        # per_cls_weights = torch.tensor(dataset.get_cls_num_list(),device='cuda')
+        # per_cls_weights = per_cls_weights.sum()/per_cls_weights
+        # per_cls_weights /=per_cls_weights.sum()
         criterion = custom.IIFLoss(dataset,variant=args.iif,iif_norm=args.iif_norm,reduction=args.reduction,weight=None)
     elif (args.classif== 'gombit'):
 #         per_cls_weights = torch.tensor(dataset.get_cls_num_list(),device='cuda')
@@ -305,11 +309,16 @@ def main(args):
         model, optimizer = amp.initialize(model, optimizer,
                                           opt_level=args.apex_opt_level
                                           )
+
     if args.decoup:
         model = select_training_param(model)
-        
-    lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(
-        optimizer, milestones=args.milestones, gamma=args.lr_gamma)
+    
+    if args.cosine_scheduler:
+        lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer,args.epochs,0)
+    else:
+        lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(
+            optimizer, milestones=args.milestones, gamma=args.lr_gamma)
 
     model_without_ddp = model
     if args.distributed:
@@ -329,6 +338,7 @@ def main(args):
         return
     
     cls_num_list = dataset.get_cls_num_list()
+
     print("Start training")
     start_time = time.time()
     best_acc = 0
@@ -406,10 +416,12 @@ def get_args_parser(add_help=True):
     parser.add_argument('--opt', default='sgd', type=str, help='optimizer')
     parser.add_argument('--lr', default=0.1, type=float,
                         help='initial learning rate')
+    parser.add_argument('--cosine_scheduler',
+                        help='cosine scheduler',action='store_true')
     parser.add_argument('--momentum', default=0.9, type=float, metavar='M',
                         help='momentum')
-    parser.add_argument('--wd', '--weight-decay', default=1e-4, type=float,
-                        metavar='W', help='weight decay (default: 1e-4)',
+    parser.add_argument('--wd', '--weight-decay', default=5e-4, type=float,
+                        metavar='W', help='weight decay (default: 5e-4)',
                         dest='weight_decay')
     parser.add_argument('--milestones',nargs='+', default=[160,180],type=int,
                         help='decrease lr every step-size epochs')
