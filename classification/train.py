@@ -7,6 +7,7 @@ import torch.utils.data
 from torch import nn
 import torchvision
 import imbalanced_dataset
+import pandas as pd
 
 import presets
 import utils
@@ -22,6 +23,18 @@ try:
 except ImportError:
     amp = None
 
+
+def record_result(result,args):
+    df = pd.DataFrame.from_dict(vars(args))
+    df['acc']=result
+    file2save=os.path.join(args.output_dir,'results.csv')
+    df = df.iloc[1: , :]
+    if os.path.exists(file2save):
+        df.to_csv(file2save, mode='a', header=False)
+    else:
+        df.to_csv(file2save)
+    
+    
 
 def train_one_epoch(model, criterion, optimizer, data_loader, device, epoch, args):
     model.train()
@@ -115,6 +128,20 @@ def _get_cache_path(filepath):
     return cache_path
 
 
+def select_training_param(model):
+
+    for v in model.parameters():
+        v.requires_grad = False
+    torch.nn.init.xavier_uniform_(model.linear.weight)
+    model.linear.bias.data.fill_(0.01)
+    
+    model.linear.weight.requires_grad = True
+    model.linear.bias.requires_grad = True
+    
+
+    return model
+
+
 def load_data(traindir, valdir, args):
     # Data loading code
     print("Loading data")
@@ -182,7 +209,6 @@ def main(args):
         utils.mkdir(args.output_dir)
 
     utils.init_distributed_mode(args)
-    print(args)
 
     device = torch.device(args.device)
 
@@ -220,7 +246,7 @@ def main(args):
         per_cls_weights = torch.tensor(dataset.get_cls_num_list(),device='cuda')
         per_cls_weights = per_cls_weights.sum()/per_cls_weights
         per_cls_weights /=per_cls_weights.sum()
-        criterion = custom.IIFLoss(dataset,variant=args.iif,iif_norm=args.iif_norm,reduction=args.reduction,weight=per_cls_weights)
+        criterion = custom.IIFLoss(dataset,variant=args.iif,iif_norm=args.iif_norm,reduction=args.reduction,weight=None)
     elif (args.classif== 'gombit'):
 #         per_cls_weights = torch.tensor(dataset.get_cls_num_list(),device='cuda')
 #         per_cls_weights = per_cls_weights.sum()/per_cls_weights
@@ -279,6 +305,8 @@ def main(args):
         model, optimizer = amp.initialize(model, optimizer,
                                           opt_level=args.apex_opt_level
                                           )
+    if args.decoup:
+        model = select_training_param(model)
         
     lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(
         optimizer, milestones=args.milestones, gamma=args.lr_gamma)
@@ -320,6 +348,7 @@ def main(args):
             elif args.schedule=='iif':
 #                 per_cls_weights = torch.tensor(dataset.get_cls_num_list(),device='cuda')
 #                 per_cls_weights = per_cls_weights.sum()/per_cls_weights
+                model = select_training_param(model)
                 criterion = custom.IIFLoss(dataset,variant=args.iif,iif_norm=args.iif_norm,reduction=args.reduction)
                 
         
@@ -349,6 +378,10 @@ def main(args):
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
     print('Training time {}'.format(total_time_str))
     print('best acc is:',best_acc)
+    if args.record_result:
+        if utils.is_main_process():
+            record_result(best_acc,args)
+    
 
 
 def get_args_parser(add_help=True):
@@ -393,6 +426,7 @@ def get_args_parser(add_help=True):
     parser.add_argument('--iif_norm', default=0, type=int, help='IIF norm')
     parser.add_argument('--feat_select', default=None, type=str, help='pick either chi2 or mutual_info_classif')
     parser.add_argument('--schedule', default='normal', type=str, help='strategy of loss functions')
+    parser.add_argument('--decoup',action="store_true", help='Freeze all layers except classif layer')
     parser.add_argument('--lincomb_if', default=1.0, type=float, help='LinearCombination factor, applicable if schedule:lincomb')
     parser.add_argument('--sampler', default='random', type=str, help='sampling, [random,upsampling,downsampling]')
     parser.add_argument('--reduction', default='mean', type=str, help='reduce mini batch')
@@ -430,7 +464,7 @@ def get_args_parser(add_help=True):
     # Mixed precision training parameters
     parser.add_argument('--apex', action='store_true',
                         help='Use apex for mixed precision training')
-    parser.add_argument('--apex-opt-level', default='O1', type=str,
+    parser.add_argument('--apex-opt-level', default='O2', type=str,
                         help='For apex mixed precision training'
                              'O0 for FP32 training, O1 for mixed precision training.'
                              'For further detail, see https://github.com/NVIDIA/apex/tree/master/examples/imagenet'
@@ -441,6 +475,9 @@ def get_args_parser(add_help=True):
                         help='number of distributed processes')
     parser.add_argument('--dist-url', default='env://',
                         help='url used to set up distributed training')
+    parser.add_argument('--record-result', dest="record_result",
+        help="Record result in csv format",
+        action="store_true")
 
     return parser
 

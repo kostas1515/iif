@@ -79,6 +79,42 @@ class GombitLoss(nn.Module):
         
         return loss
     
+# class GammaLoss(nn.Module):
+#     def __init__(self,num_classes,reduction='mean',device='cuda',weights=None):
+#         super(GammaLoss,self).__init__()
+#         self.loss_fn = nn.BCELoss(reduction='none').to(device)
+#         self.reduction=reduction
+#         if (weights is not None): 
+#             self.weights=weights
+#         else:
+#             self.weights=torch.ones(num_classes,device='cuda')
+        
+# #         freqs = torch.tensor(list(dataset.num_per_cls_dict.values()),device='cuda',dtype=torch.float)
+# #         self.weights = torch.log(freqs.sum()/freqs).unsqueeze(0)
+
+#     def set_weights(self,weights):
+#         self.weights=weights
+        
+#     def forward(self, pred, targets):
+#         y_onehot = torch.cuda.FloatTensor(pred.shape)
+#         y_onehot.zero_()
+#         y_onehot.scatter_(1, targets.unsqueeze(1), 1)
+# #         pred=torch.clamp(pred,min=-4,max=10)
+#         pestim=torch.igamma(torch.exp(pred),1)
+#         loss =  self.loss_fn(pestim,y_onehot)
+#         loss*=self.weights[targets].unsqueeze(1)
+        
+# #         pos_grad = (torch.exp(-pred)*(y_onehot)).sum()
+# #         neg_grad = (torch.exp(-pred)/(torch.exp(torch.exp(-pred))-1))*(1-y_onehot)
+# #         print(f'pos grad is:{pos_grad.sum()}, neg grad is:{neg_grad.sum()}')
+        
+#         if self.reduction=='mean':
+#             loss=loss.mean()
+#         elif self.reduction=='sum':
+#             loss=loss.sum()/targets.shape[0]
+        
+#         return loss
+    
 class GaussianLoss(nn.Module):
     def __init__(self,num_classes,reduction='mean',device='cuda',weights=None):
         super(GaussianLoss,self).__init__()
@@ -336,15 +372,22 @@ class LinearCombine(object):
         batch_images=torch.cat(batch_images,axis=0)
         for i in range(self.num_classes):
             mask  = batch_targets==i
-            images2blend  = batch_images[mask]
-            group_size=images2blend.shape[0]
-            if group_size>1:
-                repeat = int(group_size*increase_factor)
-                for j in range(repeat):
-                    weights=10*torch.rand(group_size,1,1,1) -5*torch.rand(1)
-                    weights=weights.cuda()
-                    new_images.append((images2blend*weights).sum(axis=0))
-                    new_targets.append(i)
+            if (mask.sum()>2):
+                indices = torch.nonzero(mask)
+                perm = torch.randperm(indices.size(0))
+                idx = perm[:2]
+                samples = indices[idx].squeeze(1)
+
+                images2blend  = batch_images[samples]
+                group_size=images2blend.shape[0]
+                if group_size>1:
+                    repeat = int(group_size*increase_factor)
+                    for j in range(repeat):
+#                         weights=10*torch.rand(group_size,1,1,1) -5*torch.rand(1)
+                        weights=torch.rand(group_size,1,1,1)
+                        weights=weights.cuda()
+                        new_images.append((images2blend*weights).sum(axis=0))
+                        new_targets.append(i)
         new_targets=torch.tensor(new_targets,device='cuda',dtype=torch.long)
         new_images = torch.stack(new_images,axis=0)
         final_images=torch.cat([new_images,image],axis=0)
