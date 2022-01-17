@@ -49,17 +49,17 @@ def train_one_epoch(model, criterion, optimizer, data_loader, device, epoch, arg
     header = 'Epoch: [{}]'.format(epoch)
     
     lr_scheduler = None
-    if epoch <5:
-        warmup_factor = 1. / 1000
-        warmup_iters = min(1000, 5*len(data_loader) - 1)
-
-        lr_scheduler = utils.warmup_lr_scheduler(optimizer, warmup_iters, warmup_factor)
-        
-    if epoch ==5:
+    if epoch <1:
         warmup_factor = 1. / 1000
         warmup_iters = min(1000, len(data_loader) - 1)
 
         lr_scheduler = utils.warmup_lr_scheduler(optimizer, warmup_iters, warmup_factor)
+        
+    # if epoch ==5:
+    #     warmup_factor = 1. / 1000
+    #     warmup_iters = min(1000, len(data_loader) - 1)
+
+    #     lr_scheduler = utils.warmup_lr_scheduler(optimizer, warmup_iters, warmup_factor)
     
     lincomb=LinearCombine(len(data_loader.dataset.classes),increase_factor=args.lincomb_if)
     for image, target in metric_logger.log_every(data_loader, print_freq, header):
@@ -141,7 +141,7 @@ def select_training_param(model):
         model.fc.bias.data.fill_(0.01)
         model.fc.weight.requires_grad = True
         model.fc.bias.requires_grad = True
-        
+
     return model
 
 
@@ -225,7 +225,7 @@ def main(args):
         num_classes = len(dataset.classes)
     elif args.dset_name =="imagenet_lt":
         dataset, dataset_test, train_sampler, test_sampler = imbalanced_dataset.get_imagenet_lt(args.distributed, root=args.data_path,
-                              batch_size=args.batch_size, num_works=args.workers)
+                              batch_size=args.batch_size, num_works=args.workers,sampler = args.sampler)
         num_classes = len(dataset.cls_num_list)
     else:
         dataset, dataset_test, train_sampler, test_sampler = custom.load_cifar(args)
@@ -336,32 +336,35 @@ def main(args):
         lr_scheduler.load_state_dict(checkpoint['lr_scheduler'])
         args.start_epoch = checkpoint['epoch'] + 1
 
+    if args.load_from:
+        checkpoint = torch.load(args.load_from, map_location='cpu')
+        model_without_ddp.load_state_dict(checkpoint['model'])
+
+
     if args.test_only:
         evaluate(model, criterion, data_loader_test, device=device)
         return
     
-    cls_num_list = dataset.get_cls_num_list()
 
     print("Start training")
     start_time = time.time()
     best_acc = 0
     for epoch in range(args.start_epoch, args.epochs):
-        if (epoch>159):
+        if (epoch>=args.milestones[0]):
             if args.schedule=='lincomb':
-                args.schedule='cost'
-        if epoch>179:
+                args.schedule='iif'
+        if epoch>=args.milestones[1]:
             if args.schedule=='cost':
                 per_cls_weights = torch.tensor(dataset.get_cls_num_list(),device='cuda')
                 per_cls_weights = per_cls_weights.sum()/per_cls_weights
                 if args.classif=='ce':
                     criterion = custom.CELoss(feat_select=args.feat_select,weights=per_cls_weights) 
                 else:
-                    criterion.set_weights(per_cls_weights)
-                    
+                    criterion.set_weights(per_cls_weights)  
             elif args.schedule=='iif':
 #                 per_cls_weights = torch.tensor(dataset.get_cls_num_list(),device='cuda')
 #                 per_cls_weights = per_cls_weights.sum()/per_cls_weights
-                model = select_training_param(model)
+                # model.module = select_training_param(model.module)
                 criterion = custom.IIFLoss(dataset,variant=args.iif,iif_norm=args.iif_norm,reduction=args.reduction)
                 
         
@@ -434,6 +437,7 @@ def get_args_parser(add_help=True):
                         type=int, help='print frequency')
     parser.add_argument('--output-dir', default='.', help='path where to save')
     parser.add_argument('--resume', default='', help='resume from checkpoint')
+    parser.add_argument('--load_from', default='', help='load wweights only from checkpoint')
     parser.add_argument('--classif', default='ce',type=str, help='Type of classification')
     parser.add_argument('--gamma', default=2.0,type=float, help='Focal loss gamma hp')
     parser.add_argument('--alpha', default=None,type=float, help='Focal loss alpha hp')

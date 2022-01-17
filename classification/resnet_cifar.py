@@ -148,6 +148,7 @@ def resnet1202():
     return ResNet_s(BasicBlock, [200, 200, 200])
 
 
+
 def test(net):
     import numpy as np
     total_params = 0

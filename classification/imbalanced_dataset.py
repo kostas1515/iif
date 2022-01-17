@@ -6,6 +6,7 @@ import torchvision.datasets
 from torch.utils.data import Dataset
 import os
 from PIL import Image
+from catalyst.data import  BalanceClassSampler,DistributedSamplerWrapper
 
 class IMBALANCECIFAR10(torchvision.datasets.CIFAR10):
     cls_num = 10
@@ -225,7 +226,7 @@ class LT_Dataset_Eval(Dataset):
         return sample, target 
 
 
-def get_imagenet_lt(distributed, root="", batch_size=60, num_works=4):
+def get_imagenet_lt(distributed, root="", batch_size=60, num_works=4,sampler='random'):
 
         
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
@@ -252,15 +253,24 @@ def get_imagenet_lt(distributed, root="", batch_size=60, num_works=4):
     
     train_dataset = LT_Dataset(root, train_txt, transform=transform_train)
     eval_dataset = LT_Dataset_Eval(root, eval_txt, transform=transform_test, class_map=train_dataset.class_map)
-    
-    print("Creating data loaders")
+
     if distributed:
-        train_sampler = torch.utils.data.distributed.DistributedSampler(
-            train_dataset)
+        if sampler=='random':
+            train_sampler = torch.utils.data.distributed.DistributedSampler(
+                train_dataset)
+        else:
+            train_labels = train_dataset.targets
+            balanced_sampler = BalanceClassSampler(train_labels,mode=sampler)
+            train_sampler= DistributedSamplerWrapper(balanced_sampler)
+
         test_sampler = torch.utils.data.distributed.DistributedSampler(
             eval_dataset)
     else:
-        train_sampler = torch.utils.data.RandomSampler(train_dataset)
+        if sampler=='random':
+            train_sampler = torch.utils.data.RandomSampler(train_dataset)
+        else:
+            train_labels = train_dataset.targets
+            train_sampler = BalanceClassSampler(train_labels,mode=sampler)
         test_sampler = torch.utils.data.SequentialSampler(eval_dataset)
 
     return train_dataset, eval_dataset, train_sampler, test_sampler

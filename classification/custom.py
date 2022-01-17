@@ -6,7 +6,7 @@ from torchvision.transforms import transforms
 import torchvision.datasets as datasets
 import os
 import numpy as np
-from scipy.special import ndtri
+from scipy.special import ndtri,softmax
 from sklearn.feature_selection import chi2,mutual_info_classif,f_classif
 from sklearn.feature_selection import SelectKBest
 import torch.distributed as dist
@@ -364,6 +364,25 @@ def load_cifar(args):
         if args.sampler=='random':
             train_sampler = torch.utils.data.distributed.DistributedSampler(
                 train_dataset)
+        elif args.sampler=='weighted':
+            class_weights = np.array(train_dataset.get_cls_num_list())
+
+            class_weights = (class_weights - class_weights.min()) / (class_weights.max() - class_weights.min())
+            class_weights -=0.5
+            # print(np.median(class_weights))
+            # class_weights = (class_weights - np.mean(class_weights))/np.std(class_weights)
+            print(class_weights)
+
+            class_weights = np.exp(-class_weights**2)
+            class_weights=np.abs(class_weights)
+            class_weights = softmax(class_weights)
+
+            print(class_weights)
+            weighted_sampler = torch.utils.data.WeightedRandomSampler(
+                weights=class_weights,
+                num_samples=class_weights.shape[0],
+                replacement=True)
+            train_sampler= DistributedSamplerWrapper(weighted_sampler)
         else:
             train_labels = train_dataset.targets
             balanced_sampler = BalanceClassSampler(train_labels,mode=args.sampler)
@@ -383,17 +402,14 @@ def load_cifar(args):
 
 class LinearCombine(object):
     """Mix images
-
     Args:
         output_size (tuple or int): Desired output size. If int, square crop
             is made.
     """
-
     def __init__(self,num_classes,increase_factor=1):
         self.increase_factor=increase_factor
         self.num_classes=num_classes
     
-
     def __call__(self, image,target):
         new_images=[]
         new_targets=[]
@@ -404,28 +420,38 @@ class LinearCombine(object):
         dist.all_gather(batch_images,image)
         batch_targets=torch.cat(batch_targets,axis=0)
         batch_images=torch.cat(batch_images,axis=0)
-        for i in range(self.num_classes):
-            mask  = batch_targets==i
-            if (mask.sum()>2):
-                indices = torch.nonzero(mask)
-                perm = torch.randperm(indices.size(0))
-                idx = perm[:2]
-                samples = indices[idx].squeeze(1)
 
-                images2blend  = batch_images[samples]
-                group_size=images2blend.shape[0]
-                if group_size>1:
-                    repeat = int(group_size*increase_factor)
-                    for j in range(repeat):
-#                         weights=10*torch.rand(group_size,1,1,1) -5*torch.rand(1)
-                        weights=torch.rand(group_size,1,1,1)
-                        weights=weights.cuda()
-                        new_images.append((images2blend*weights).sum(axis=0))
-                        new_targets.append(i)
-        new_targets=torch.tensor(new_targets,device='cuda',dtype=torch.long)
+        candidates = torch.bincount(batch_targets,minlength=self.num_classes)
+        candidates[candidates<2]=0
+        candidates_indices = torch.nonzero(candidates)
+        candidates=(candidates[candidates!=0])
+        candidates=candidates.unsqueeze(1)
+        new_images=[((10*torch.rand(cand,1,1,1) -5*torch.rand(1)).cuda()*batch_images[batch_targets==ind]).sum(axis=0) for ind,cand in zip(candidates_indices,candidates) for k in range(cand)]
+        new_targets = [ind*torch.ones([cand],device='cuda',dtype=torch.long) for ind,cand in zip(candidates_indices,candidates)]
         new_images = torch.stack(new_images,axis=0)
-        final_images=torch.cat([new_images,image],axis=0)
-        final_targets=torch.cat([new_targets,target],axis=0)
-        return final_images,final_targets
+        new_targets = torch.cat(new_targets,axis=0)
+ 
+        # for i in range(self.num_classes):
+        #     mask  = batch_targets==i
+        #     images2blend  = batch_images[mask]
+        #     group_size=images2blend.shape[0]
+        #     if group_size>1:
+        #         repeat = int(group_size*increase_factor)
+        #         for j in range(repeat):
+        #             # weights=torch.rand(group_size,1,1,1)
+        #             weights=10*torch.rand(group_size,1,1,1) -5*torch.rand(1)
+        #             weights=weights.cuda()
+        #             new_images.append((images2blend*weights).sum(axis=0))
+        #             new_targets.append(i)
+        try:
+            # new_targets=torch.tensor(new_targets,device='cuda',dtype=torch.long)
+            # new_images = torch.stack(new_images,axis=0)
+            final_images=torch.cat([new_images,image],axis=0)
+            final_targets=torch.cat([new_targets,target],axis=0)
+            return final_images,final_targets
+        except RuntimeError:
+            #new targets is empty
+            return image,target
+
 
 
