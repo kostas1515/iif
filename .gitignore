@@ -1,0 +1,9 @@
+checkpoints/
+batch_files/
+slurm/
+notebooks/
+decoup/
+outputs/
+
+
+
