@@ -101,10 +101,12 @@ def evaluate(model, criterion, data_loader, device, print_freq=100):
             target = target.to(device, non_blocking=True)
             output = model(image)
 #             loss = criterion(output, target)
-            weights = 1
             if  hasattr(criterion, 'iif'):
-                weights = criterion.iif[criterion.variant]                
-            acc1, acc5 = utils.accuracy(output*weights , target, topk=(1, 5))
+#                 if criterion.log_adj is False:
+#                     weights = criterion.iif[criterion.variant]
+                output=criterion(output,infer=True)
+                
+            acc1, acc5 = utils.accuracy(output, target, topk=(1, 5))
             # FIXME need to take into account that the datasets
             # could have been padded in distributed setup
             batch_size = image.shape[0]
@@ -129,6 +131,7 @@ def _get_cache_path(filepath):
 
 
 def select_training_param(model):
+#     print(model)
     for v in model.parameters():
         v.requires_grad = False
     try:
@@ -216,6 +219,7 @@ def main(args):
     device = torch.device(args.device)
 
     torch.backends.cudnn.benchmark = True
+    print(args)
     
     if args.dset_name =="ImageNet":
         train_dir = os.path.join(args.data_path, 'train')
@@ -287,6 +291,8 @@ def main(args):
         torch.nn.init.constant_(model.linear.bias.data,-2)
         torch.nn.init.normal_(model.linear.weight.data,0.0,0.001)
     elif (args.classif== 'multiactivation'):
+#         per_cls_weights = torch.tensor(dataset.get_cls_num_list(),device='cuda')
+#         per_cls_weights = per_cls_weights.sum()/per_cls_weights
         criterion = custom.MultiActivationLoss(len(dataset.classes),reduction=args.reduction)
         torch.nn.init.constant_(model.linear.bias.data,-2)
         torch.nn.init.normal_(model.linear.weight.data,0.0,0.001)

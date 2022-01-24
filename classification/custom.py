@@ -19,7 +19,14 @@ class IIFLoss(nn.Module):
         super(IIFLoss, self).__init__()
         self.loss_fcn = nn.CrossEntropyLoss(reduction='none',weight=weight)
         self.reduction=reduction
+        self.beta = torch.nn.Parameter(torch.ones(7,device='cuda'))
 #         self.loss_fcn = nn.MultiMarginLoss(reduction=reduction,weight=weight)
+        if variant == 'log_adj':
+            variant = 'raw'
+            self.log_adj = True
+        else:
+            self.log_adj = False
+        
         self.variant = variant
         freqs = np.array(dataset.get_cls_num_list())
         iif={}
@@ -36,14 +43,35 @@ class IIFLoss(nn.Module):
             self.iif = {k: v/torch.norm(v,p=iif_norm)  for k, v in self.iif.items()}
 #         print(self.iif[self.variant])
         
-    def forward(self, pred, targets):
-        loss = self.loss_fcn(pred*self.iif[self.variant],targets)
-        if self.reduction=='mean':
-            loss=loss.mean()
-        elif self.reduction=='sum':
-            loss=loss.sum()
-        return loss
-    
+    def forward(self, pred, targets=None,infer=False):
+        
+#         weighted_prob=torch.abs(self.beta)
+        weighted_prob=torch.softmax(self.beta,dim=-1)
+#         weighted_prob=torch.sigmoid(self.beta)
+
+        
+        
+        if infer is False:
+            if self.log_adj is True:
+                loss = self.loss_fcn(pred-self.iif[self.variant],targets)
+            else:
+#                 loss = weighted_prob*(self.loss_fcn(pred*self.iif[self.variant],targets)) + \
+#                        (1-weighted_prob)*(self.loss_fcn(pred+self.iif[self.variant],targets))
+                loss = self.loss_fcn(pred*self.iif[self.variant],targets)
+#                 loss = torch.stack([weighted_prob[counter]*self.loss_fcn(pred*v[1],targets) \
+#                                     for counter,v in enumerate(self.iif.items())],axis=0).sum(axis=0)
+
+            if self.reduction=='mean':
+                loss=loss.mean()
+            elif self.reduction=='sum':
+                loss=loss.sum()
+            return loss
+        else:
+#             print(weighted_prob)
+#             out=torch.stack([weighted_prob[counter]*(pred*v[1]) for counter, v in enumerate(self.iif.items())],axis=0).sum(axis=0)
+            out = (pred*self.iif[self.variant])
+            return out
+
 class GombitLoss(nn.Module):
     def __init__(self,num_classes,reduction='mean',device='cuda',weights=None):
         super(GombitLoss,self).__init__()
@@ -221,7 +249,9 @@ class CELoss(nn.Module):
         if self.reduction=='mean':
             loss=loss.mean()
         elif self.reduction=='sum':
-            loss=loss.sum()/targets.shape[0]
+#             loss=loss.sum()/targets.shape[0]
+            loss=loss.sum()
+
         
         return loss
     
@@ -247,7 +277,8 @@ class MultiActivationLoss(nn.Module):
         gumbel_p=1/(torch.exp(torch.exp((-torch.clamp(pred,min=-4,max=10)))))
         normal_p=1/2+torch.erf(torch.clamp(pred,min=-8,max=8)/(2**(1/2)))/2
         logistic_p=torch.sigmoid(pred)
-        weighted_prob=torch.softmax(self.beta,dim=0)     
+        weighted_prob=torch.softmax(self.beta,dim=0)
+        
 #         print(f'gumbel:{weighted_prob[0]},normal:{weighted_prob[1]},logistic:{weighted_prob[2]}')
         pestim=gumbel_p*weighted_prob[0]+normal_p*weighted_prob[1]+logistic_p*weighted_prob[2]
         
@@ -368,14 +399,13 @@ def load_cifar(args):
             class_weights = np.array(train_dataset.get_cls_num_list())
 
             class_weights = (class_weights - class_weights.min()) / (class_weights.max() - class_weights.min())
-            class_weights -=0.5
+            class_weights = 1/(class_weights+0.1)
             # print(np.median(class_weights))
             # class_weights = (class_weights - np.mean(class_weights))/np.std(class_weights)
-            print(class_weights)
 
-            class_weights = np.exp(-class_weights**2)
-            class_weights=np.abs(class_weights)
-            class_weights = softmax(class_weights)
+#             class_weights = np.exp(-class_weights**2)
+#             class_weights=np.abs(class_weights)
+#             class_weights = softmax(class_weights)
 
             print(class_weights)
             weighted_sampler = torch.utils.data.WeightedRandomSampler(
