@@ -7,6 +7,7 @@ from torch.utils.data import Dataset
 import os
 from PIL import Image
 from catalyst.data import  BalanceClassSampler,DistributedSamplerWrapper
+from randaugment import CIFAR10Policy,ImageNetPolicy
 
 class IMBALANCECIFAR10(torchvision.datasets.CIFAR10):
     cls_num = 10
@@ -226,20 +227,28 @@ class LT_Dataset_Eval(Dataset):
         return sample, target 
 
 
-def get_imagenet_lt(distributed, root="", batch_size=60, num_works=4,sampler='random'):
+def get_imagenet_lt(distributed, root="",auto_augment=None,sampler='random'):
 
         
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     
-    transform_train = transforms.Compose([
-        transforms.RandomResizedCrop(224),
-        transforms.RandomHorizontalFlip(),
-        transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4, hue=0),
-        transforms.ToTensor(),
-        normalize,
-        ])
-    
-
+    if auto_augment=='imagenet':
+        transform_train = transforms.Compose([
+            transforms.RandomResizedCrop(224),
+            transforms.RandomHorizontalFlip(),
+            ImageNetPolicy(),
+            transforms.ToTensor(),
+            normalize,
+            ])
+    else:
+        transform_train = transforms.Compose([
+            transforms.RandomResizedCrop(224),
+            transforms.RandomHorizontalFlip(),
+            transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4, hue=0),
+            transforms.ToTensor(),
+            normalize,
+            ])
+        
     transform_test = transforms.Compose([
             transforms.Resize(256),
             transforms.CenterCrop(224),

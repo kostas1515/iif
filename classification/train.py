@@ -13,6 +13,7 @@ import presets
 import utils
 import custom
 import resnet_cifar
+import resnet_pytorch
 import numpy as np
 from sklearn.feature_selection import chi2,mutual_info_classif,f_classif
 from sklearn.feature_selection import SelectKBest
@@ -68,7 +69,10 @@ def train_one_epoch(model, criterion, optimizer, data_loader, device, epoch, arg
         if args.schedule=='lincomb':
             image, target=lincomb(image, target)
         output = model(image)
-        loss = criterion(output, target)
+        if type(output)==tuple:
+            loss = criterion(output, target,infer=False,epoch=epoch)
+        else:
+            loss = criterion(output, target)
         optimizer.zero_grad()
         if apex:
             with amp.scale_loss(loss, optimizer) as scaled_loss:
@@ -77,7 +81,10 @@ def train_one_epoch(model, criterion, optimizer, data_loader, device, epoch, arg
             loss.backward()
         optimizer.step()
         
-        acc1, acc5 = utils.accuracy(output, target, topk=(1, 5))
+        if type(output)==tuple:
+            acc1, acc5 = utils.accuracy(output[0], target, topk=(1, 5))
+        else:
+            acc1, acc5 = utils.accuracy(output, target, topk=(1, 5))
         batch_size = image.shape[0]
         
         if lr_scheduler is not None:
@@ -101,12 +108,14 @@ def evaluate(model, criterion, data_loader, device, print_freq=100):
             target = target.to(device, non_blocking=True)
             output = model(image)
 #             loss = criterion(output, target)
-            if  hasattr(criterion, 'iif'):
-#                 if criterion.log_adj is False:
-#                     weights = criterion.iif[criterion.variant]
-                output=criterion(output,infer=True)
-                
-            acc1, acc5 = utils.accuracy(output, target, topk=(1, 5))
+            if (type(output)==tuple):
+                out=criterion(output,infer=True)
+                acc1, acc5 = utils.accuracy(out, target, topk=(1, 5))
+            else:
+                if hasattr(criterion, 'iif'):
+                    output=criterion(output,infer=True)
+                acc1, acc5 = utils.accuracy(output, target, topk=(1, 5))
+            
             # FIXME need to take into account that the datasets
             # could have been padded in distributed setup
             batch_size = image.shape[0]
@@ -136,9 +145,12 @@ def select_training_param(model):
         v.requires_grad = False
     try:
         torch.nn.init.xavier_uniform_(model.linear.weight)
-        model.linear.bias.data.fill_(0.01)
         model.linear.weight.requires_grad = True
-        model.linear.bias.requires_grad = True
+        try:
+            model.linear.bias.data.fill_(0.01)
+            model.linear.bias.requires_grad = True
+        except torch.nn.modules.module.ModuleAttributeError:
+            pass
     except torch.nn.modules.module.ModuleAttributeError:
         torch.nn.init.xavier_uniform_(model.fc.weight)
         model.fc.bias.data.fill_(0.01)
@@ -228,16 +240,22 @@ def main(args):
             train_dir, val_dir, args)
         num_classes = len(dataset.classes)
     elif args.dset_name =="imagenet_lt":
+        auto_augment_policy = getattr(args, "auto_augment", None)
         dataset, dataset_test, train_sampler, test_sampler = imbalanced_dataset.get_imagenet_lt(args.distributed, root=args.data_path,
-                              batch_size=args.batch_size, num_works=args.workers,sampler = args.sampler)
+                              auto_augment=auto_augment_policy,sampler = args.sampler)
         num_classes = len(dataset.cls_num_list)
     else:
         dataset, dataset_test, train_sampler, test_sampler = custom.load_cifar(args)
         num_classes = len(dataset.num_per_cls_dict)
-        
-    data_loader = torch.utils.data.DataLoader(
-        dataset, batch_size=args.batch_size,
-        sampler=train_sampler, num_workers=args.workers, pin_memory=True)
+    
+    if args.contrastive_learning>0:
+        data_loader = torch.utils.data.DataLoader(
+            dataset, batch_size=args.batch_size,
+            sampler=train_sampler, num_workers=args.workers, pin_memory=True,collate_fn=presets.my_collate)
+    else:
+        data_loader = torch.utils.data.DataLoader(
+            dataset, batch_size=args.batch_size,
+            sampler=train_sampler, num_workers=args.workers, pin_memory=True)
 
     data_loader_test = torch.utils.data.DataLoader(
         dataset_test, batch_size=args.batch_size,
@@ -245,10 +263,12 @@ def main(args):
 
     print("Creating model")
     try:
-        model = torchvision.models.__dict__[args.model](pretrained=args.pretrained,num_classes=num_classes)
+        # model = torchvision.models.__dict__[args.model](pretrained=args.pretrained,num_classes=num_classes)
+        model = eval(f'resnet_pytorch.{args.model}(num_classes={num_classes},use_norm="{args.classif_norm}")')
     except KeyError:
         #model does not exist in pytorch load it from resnset_cifar
-        model = eval(f'resnet_cifar.{args.model}(num_classes={num_classes})')
+        model = eval(f'resnet_cifar.{args.model}(num_classes={num_classes},use_norm="{args.classif_norm}")')
+            
     model.to(device)
     if args.distributed and args.sync_bn:
         model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
@@ -281,9 +301,10 @@ def main(args):
         torch.nn.init.normal_(model.linear.weight.data,0.0,0.001)
     elif (args.classif== 'ce_loss'):
         per_cls_weights = torch.tensor(dataset.get_cls_num_list(),device='cuda')
-        per_cls_weights = per_cls_weights.sum()/per_cls_weights
+        per_cls_weights = torch.log(per_cls_weights.sum()/per_cls_weights)
+        # per_cls_weights = per_cls_weights.sum()/per_cls_weights
 #         per_cls_weights = per_cls_weights/torch.norm(per_cls_weights,p=2)
-        criterion = custom.CELoss(feat_select=args.feat_select,weights=per_cls_weights)
+        criterion = custom.CELoss(feat_select=args.feat_select,weights=per_cls_weights,reduction=args.reduction)
     elif (args.classif== 'gaussian'):
 #         per_cls_weights = torch.tensor(dataset.get_cls_num_list(),device='cuda')
 #         per_cls_weights = per_cls_weights.sum()/per_cls_weights
@@ -299,14 +320,21 @@ def main(args):
     else:
         criterion = nn.CrossEntropyLoss()
 
+    if args.contrastive_learning>0:
+        criterion = custom.ContrastiveLoss(criterion,args.contrastive_learning,total_epochs=args.epochs)
+
     opt_name = args.opt.lower()
     if (args.classif== 'multiactivation'):
         model_parameters=list(model.parameters())+list(criterion.parameters())
     else: 
         model_parameters=model.parameters()
+
     if opt_name == 'sgd':
         optimizer = torch.optim.SGD(
             model_parameters, lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
+    elif opt_name == 'nesterov':
+        optimizer = torch.optim.SGD(
+            model_parameters, lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay,nesterov=True)
     elif opt_name == 'rmsprop':
         optimizer = torch.optim.RMSprop(model_parameters, lr=args.lr, momentum=args.momentum,
                                         weight_decay=args.weight_decay, eps=0.0316, alpha=0.9)
@@ -332,7 +360,7 @@ def main(args):
     model_without_ddp = model
     if args.distributed:
         model = torch.nn.parallel.DistributedDataParallel(
-            model, device_ids=[args.gpu])
+            model, device_ids=[args.gpu],find_unused_parameters=True)
         model_without_ddp = model.module
 
     if args.resume:
@@ -445,6 +473,7 @@ def get_args_parser(add_help=True):
     parser.add_argument('--resume', default='', help='resume from checkpoint')
     parser.add_argument('--load_from', default='', help='load wweights only from checkpoint')
     parser.add_argument('--classif', default='ce',type=str, help='Type of classification')
+    parser.add_argument('--classif_norm', default=None,type=str, help='Type of classifier Normalisation {None,norm,cosine')
     parser.add_argument('--gamma', default=2.0,type=float, help='Focal loss gamma hp')
     parser.add_argument('--alpha', default=None,type=float, help='Focal loss alpha hp')
     parser.add_argument('--iif', default='raw',type=str, help='Type of IIF variant')
@@ -483,6 +512,10 @@ def get_args_parser(add_help=True):
     )
     parser.add_argument('--auto-augment', default=None,
                         help='auto augment policy (default: None)')
+
+    parser.add_argument('--contrastive_learning', default=0,type=int,
+                        help='Use contrastive learning')
+
     parser.add_argument('--random-erase', default=0.0, type=float,
                         help='random erasing probability (default: 0.0)')
 
