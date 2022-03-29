@@ -5,6 +5,7 @@ import time
 import torch
 import torch.utils.data
 from torch import nn
+from torch.utils.data import dataloader
 import torchvision
 import imbalanced_dataset
 import pandas as pd
@@ -18,6 +19,7 @@ import numpy as np
 from sklearn.feature_selection import chi2,mutual_info_classif,f_classif
 from sklearn.feature_selection import SelectKBest
 from custom import LinearCombine
+import initialisers
 
 try:
     from apex import amp
@@ -130,14 +132,6 @@ def evaluate(model, criterion, data_loader, device, print_freq=100):
     return metric_logger.acc1.global_avg
 
 
-def _get_cache_path(filepath):
-    import hashlib
-    h = hashlib.sha1(filepath.encode()).hexdigest()
-    cache_path = os.path.join("~", ".torch", "vision",
-                              "datasets", "imagefolder", h[:10] + ".pt")
-    cache_path = os.path.expanduser(cache_path)
-    return cache_path
-
 
 def select_training_param(model):
 #     print(model)
@@ -153,70 +147,15 @@ def select_training_param(model):
             pass
     except torch.nn.modules.module.ModuleAttributeError:
         torch.nn.init.xavier_uniform_(model.fc.weight)
-        model.fc.bias.data.fill_(0.01)
+        try:
+            model.fc.bias.requires_grad = True
+            model.fc.bias.data.fill_(0.01)
+        except torch.nn.modules.module.ModuleAttributeError:
+            pass
         model.fc.weight.requires_grad = True
-        model.fc.bias.requires_grad = True
+        
 
     return model
-
-
-def load_data(traindir, valdir, args):
-    # Data loading code
-    print("Loading data")
-    resize_size, crop_size = (
-        342, 299) if args.model == 'inception_v3' else (256, 224)
-
-    print("Loading training data")
-    st = time.time()
-    cache_path = _get_cache_path(traindir)
-    if args.cache_dataset and os.path.exists(cache_path):
-        # Attention, as the transforms are also cached!
-        print("Loading dataset_train from {}".format(cache_path))
-        dataset, _ = torch.load(cache_path)
-    else:
-        auto_augment_policy = getattr(args, "auto_augment", None)
-        random_erase_prob = getattr(args, "random_erase", 0.0)
-        dataset = imbalanced_dataset.IMBALANCEImageNet(
-            traindir,
-            imb_type=args.imb_type,
-            imb_factor=args.imb_factor,
-            rand_number=args.rand_number,
-            transform = presets.ClassificationPresetTrain(crop_size=crop_size, auto_augment_policy=auto_augment_policy,
-                                              random_erase_prob=random_erase_prob))
-        print(dataset)
-        if args.cache_dataset:
-            print("Saving dataset_train to {}".format(cache_path))
-            utils.mkdir(os.path.dirname(cache_path))
-            utils.save_on_master((dataset, traindir), cache_path)
-    print("Took", time.time() - st)
-
-    print("Loading validation data")
-    cache_path = _get_cache_path(valdir)
-    if args.cache_dataset and os.path.exists(cache_path):
-        # Attention, as the transforms are also cached!
-        print("Loading dataset_test from {}".format(cache_path))
-        dataset_test, _ = torch.load(cache_path)
-    else:
-        dataset_test = torchvision.datasets.ImageFolder(
-            valdir,
-            presets.ClassificationPresetEval(crop_size=crop_size, resize_size=resize_size))
-        if args.cache_dataset:
-            print("Saving dataset_test to {}".format(cache_path))
-            utils.mkdir(os.path.dirname(cache_path))
-            utils.save_on_master((dataset_test, valdir), cache_path)
-
-    print("Creating data loaders")
-    if args.distributed:
-        train_sampler = torch.utils.data.distributed.DistributedSampler(
-            dataset)
-        test_sampler = torch.utils.data.distributed.DistributedSampler(
-            dataset_test)
-    else:
-        train_sampler = torch.utils.data.RandomSampler(dataset)
-        test_sampler = torch.utils.data.SequentialSampler(dataset_test)
-
-    return dataset, dataset_test, train_sampler, test_sampler
-
 
 def main(args):
     if args.apex and amp is None:
@@ -225,106 +164,29 @@ def main(args):
 
     if args.output_dir:
         utils.mkdir(args.output_dir)
-
     utils.init_distributed_mode(args)
-
     device = torch.device(args.device)
-
     torch.backends.cudnn.benchmark = True
     print(args)
     
-    if args.dset_name =="ImageNet":
-        train_dir = os.path.join(args.data_path, 'train')
-        val_dir = os.path.join(args.data_path, 'val')
-        dataset, dataset_test, train_sampler, test_sampler = load_data(
-            train_dir, val_dir, args)
-        num_classes = len(dataset.classes)
-    elif args.dset_name =="imagenet_lt":
-        auto_augment_policy = getattr(args, "auto_augment", None)
-        dataset, dataset_test, train_sampler, test_sampler = imbalanced_dataset.get_imagenet_lt(args.distributed, root=args.data_path,
-                              auto_augment=auto_augment_policy,sampler = args.sampler)
-        num_classes = len(dataset.cls_num_list)
-    else:
-        dataset, dataset_test, train_sampler, test_sampler = custom.load_cifar(args)
-        num_classes = len(dataset.num_per_cls_dict)
-    
-    if args.contrastive_learning>0:
-        data_loader = torch.utils.data.DataLoader(
-            dataset, batch_size=args.batch_size,
-            sampler=train_sampler, num_workers=args.workers, pin_memory=True,collate_fn=presets.my_collate)
-    else:
-        data_loader = torch.utils.data.DataLoader(
-            dataset, batch_size=args.batch_size,
-            sampler=train_sampler, num_workers=args.workers, pin_memory=True)
 
-    data_loader_test = torch.utils.data.DataLoader(
-        dataset_test, batch_size=args.batch_size,
-        sampler=test_sampler, num_workers=args.workers, pin_memory=True)
-
+    dataset,num_classes,data_loader,data_loader_test,train_sampler= initialisers.get_data(args)
     print("Creating model")
     try:
         # model = torchvision.models.__dict__[args.model](pretrained=args.pretrained,num_classes=num_classes)
         model = eval(f'resnet_pytorch.{args.model}(num_classes={num_classes},use_norm="{args.classif_norm}")')
-    except KeyError:
-        #model does not exist in pytorch load it from resnset_cifar
+    except AttributeError:
+        #model does not exist in pytorch load it from resnet_cifar
         model = eval(f'resnet_cifar.{args.model}(num_classes={num_classes},use_norm="{args.classif_norm}")')
             
     model.to(device)
     if args.distributed and args.sync_bn:
         model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
     
-    if (args.classif== 'iif'):
-        # per_cls_weights = torch.tensor(dataset.get_cls_num_list(),device='cuda')
-        # per_cls_weights = per_cls_weights.sum()/per_cls_weights
-        # per_cls_weights /=per_cls_weights.sum()
-        criterion = custom.IIFLoss(dataset,variant=args.iif,iif_norm=args.iif_norm,reduction=args.reduction,weight=None)
-    elif (args.classif== 'gombit'):
-#         per_cls_weights = torch.tensor(dataset.get_cls_num_list(),device='cuda')
-#         per_cls_weights = per_cls_weights.sum()/per_cls_weights
-        criterion = custom.GombitLoss(len(dataset.classes),reduction=args.reduction)
-#         torch.nn.init.constant_(model.linear.bias.data,np.log(np.log(1+1/(num_classes-1))))
-        torch.nn.init.constant_(model.linear.bias.data,-np.log(np.log(num_classes)))
-        torch.nn.init.normal_(model.linear.weight.data,0.0,0.001)
-    elif (args.classif== 'bce'):
-#         per_cls_weights = torch.tensor(dataset.get_cls_num_list(),device='cuda')
-#         per_cls_weights = per_cls_weights.sum()/per_cls_weights
-#         per_cls_weights /=per_cls_weights.sum()
-        criterion = custom.FocalLoss(gamma=0,reduction=args.reduction,feat_select=args.feat_select)
-        torch.nn.init.constant_(model.linear.bias.data,-6.5)
-        torch.nn.init.normal_(model.linear.weight.data,0.0,0.001)
-    elif (args.classif== 'focal_loss'):
-#         per_cls_weights = torch.tensor(dataset.get_cls_num_list(),device='cuda')
-#         per_cls_weights = per_cls_weights.sum()/per_cls_weights
-#         per_cls_weights /=per_cls_weights.sum()
-        criterion = custom.FocalLoss(gamma=args.gamma,alpha=args.alpha,reduction=args.reduction,feat_select=args.feat_select)
-        torch.nn.init.constant_(model.linear.bias.data,-6.5)
-        torch.nn.init.normal_(model.linear.weight.data,0.0,0.001)
-    elif (args.classif== 'ce_loss'):
-        per_cls_weights = torch.tensor(dataset.get_cls_num_list(),device='cuda')
-        per_cls_weights = torch.log(per_cls_weights.sum()/per_cls_weights)
-        # per_cls_weights = per_cls_weights.sum()/per_cls_weights
-#         per_cls_weights = per_cls_weights/torch.norm(per_cls_weights,p=2)
-        criterion = custom.CELoss(feat_select=args.feat_select,weights=per_cls_weights,reduction=args.reduction)
-    elif (args.classif== 'gaussian'):
-#         per_cls_weights = torch.tensor(dataset.get_cls_num_list(),device='cuda')
-#         per_cls_weights = per_cls_weights.sum()/per_cls_weights
-        criterion = custom.GaussianLoss(len(dataset.classes),reduction=args.reduction)
-        torch.nn.init.constant_(model.linear.bias.data,-2)
-        torch.nn.init.normal_(model.linear.weight.data,0.0,0.001)
-    elif (args.classif== 'multiactivation'):
-#         per_cls_weights = torch.tensor(dataset.get_cls_num_list(),device='cuda')
-#         per_cls_weights = per_cls_weights.sum()/per_cls_weights
-        criterion = custom.MultiActivationLoss(len(dataset.classes),reduction=args.reduction)
-        torch.nn.init.constant_(model.linear.bias.data,-2)
-        torch.nn.init.normal_(model.linear.weight.data,0.0,0.001)
-    else:
-        criterion = nn.CrossEntropyLoss()
-
-    if args.contrastive_learning>0:
-        criterion = custom.ContrastiveLoss(criterion,args.contrastive_learning,total_epochs=args.epochs)
+    criterion=initialisers.get_criterion(args,dataset,model,num_classes)
 
     opt_name = args.opt.lower()
-    if (args.classif== 'multiactivation'):
+    if (args.classif== 'multiactivation')|((args.classif== 'iif')&((args.iif== 'hybrid')|(args.iif== 'hybrid_p'))):
         model_parameters=list(model.parameters())+list(criterion.parameters())
     else: 
         model_parameters=model.parameters()
@@ -510,11 +372,19 @@ def get_args_parser(add_help=True):
         help="Use pre-trained models from the modelzoo",
         action="store_true",
     )
+    parser.add_argument(
+        "--deffered",
+        help="Use deferred schedule",
+        action="store_true",
+    )
     parser.add_argument('--auto-augment', default=None,
                         help='auto augment policy (default: None)')
 
     parser.add_argument('--contrastive_learning', default=0,type=int,
                         help='Use contrastive learning')
+
+    parser.add_argument('--tbl', action="store_true",
+                        help='Use two branch network')
 
     parser.add_argument('--random-erase', default=0.0, type=float,
                         help='random erasing probability (default: 0.0)')

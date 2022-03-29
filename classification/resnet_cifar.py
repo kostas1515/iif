@@ -81,6 +81,7 @@ class LambdaLayer(nn.Module):
 class SE_Block(nn.Module):
     "credits: https://github.com/moskomule/senet.pytorch/blob/master/senet/se_module.py#L4"
     def __init__(self, c, r=4):
+        
         super().__init__()
         self.squeeze = nn.AdaptiveAvgPool2d(1)
         # self.squeeze = nn.AdaptiveMaxPool2d(1)
@@ -260,6 +261,53 @@ class ResNet_Contrastive(nn.Module):
         return logits,features
 
 
+class ResNet_TwoBranch(nn.Module):
+
+    def __init__(self, block, num_blocks, num_classes=10, use_norm=None):
+        super(ResNet_TwoBranch, self).__init__()
+        self.in_planes = 16
+
+        self.conv1 = nn.Conv2d(3, 16, kernel_size=3, stride=1, padding=1, bias=False)
+        self.bn1 = nn.BatchNorm2d(16)
+        self.layer1 = self._make_layer(block, 16, num_blocks[0], stride=1)
+        self.layer2 = self._make_layer(block, 32, num_blocks[1], stride=2)
+        self.layer3 = self._make_layer(block, 64, num_blocks[2], stride=2)
+
+        if use_norm=='norm':
+            self.linear1 = NormedLinear(64, num_classes)
+            self.linear2 = NormedLinear(64, num_classes)
+        elif use_norm=='cosine':
+            self.linear1 = CosNorm_Classifier(64, num_classes)
+            self.linear2 = CosNorm_Classifier(64, num_classes)
+        else:
+            self.linear1 = nn.Linear(64, num_classes)
+            self.linear2 = nn.Linear(64, num_classes)
+
+        self.apply(_weights_init)
+
+    def _make_layer(self, block, planes, num_blocks, stride):
+        strides = [stride] + [1]*(num_blocks-1)
+        layers = []
+        for stride in strides:
+            layers.append(block(self.in_planes, planes, stride))
+            self.in_planes = planes * block.expansion
+
+        return nn.Sequential(*layers)
+
+    def forward(self, x):
+        out = F.relu(self.bn1(self.conv1(x)))
+        out = self.layer1(out)
+        out = self.layer2(out)
+        out = self.layer3(out)
+        out = F.avg_pool2d(out, out.size()[3])
+        out = out.view(out.size(0), -1)
+
+        logits1 = self.linear1(out)
+        logits2 = self.linear2(out)
+
+        return logits1,logits2
+
+
 def resnet20():
     return ResNet_s(BasicBlock, [3, 3, 3])
 
@@ -272,6 +320,9 @@ def se_resnet32(num_classes=10, use_norm=None):
 
 def con_resnet32(num_classes=10, use_norm=None):
     return ResNet_Contrastive(BasicBlock, [5, 5, 5], num_classes=num_classes, use_norm=use_norm)
+
+def tb_resnet32(num_classes=10, use_norm=None):
+    return ResNet_TwoBranch(BasicBlock, [5, 5, 5], num_classes=num_classes, use_norm=use_norm)
 
 def resnet44():
     return ResNet_s(BasicBlock, [7, 7, 7])

@@ -19,15 +19,29 @@ class IIFLoss(nn.Module):
     # BCEwithLogitLoss() with reduced missing label effects.
     def __init__(self,dataset,variant='raw',iif_norm=0,reduction='mean',device='cuda',weight=None):
         super(IIFLoss, self).__init__()
-        self.loss_fn = nn.CrossEntropyLoss(reduction='none',weight=weight)
+        self.loss_fcn = nn.CrossEntropyLoss(reduction='none',weight=weight)
         self.reduction=reduction
         
+#         self.loss_fcn = nn.MultiMarginLoss(reduction=reduction,weight=weight)
         if variant == 'log_adj':
             variant = 'raw'
             self.log_adj = True
         else:
             self.log_adj = False
-        
+            
+        if (variant == 'hybrid')|(variant == 'hybrid_p'):
+            self.beta = torch.nn.Parameter(0.0*torch.ones(1,device='cuda'))
+            if (variant == 'hybrid_p'):
+                self.gamma = torch.nn.Parameter(0.5*torch.ones(7,device='cuda'))
+                self.hybrid_p = True
+            else:
+                self.hybrid_p = False
+            variant = 'raw'
+            self.hybrid = True
+        else:
+            self.hybrid = False
+            self.hybrid_p = False
+            
         self.variant = variant
         freqs = np.array(dataset.get_cls_num_list())
         iif={}
@@ -42,14 +56,35 @@ class IIFLoss(nn.Module):
         self.iif = {k: torch.tensor([v],dtype=torch.float).to(device,non_blocking=True) for k, v in iif.items()}
         if iif_norm >0:
             self.iif = {k: v/torch.norm(v,p=iif_norm)  for k, v in self.iif.items()}
-        # print(self.iif.items())
+#         print(self.iif[self.variant])
         
     def forward(self, pred, targets=None,infer=False):
+        
+#         weighted_prob=torch.abs(self.beta)
+#         weighted_prob=torch.softmax(self.beta,dim=-1)
+        if self.hybrid is True:
+            weighted_prob=torch.sigmoid(self.beta)
+            if self.hybrid_p is True:
+                weighted_probs=torch.softmax(self.gamma,dim=-1)
+    
         if infer is False:
             if self.log_adj is True:
-                loss = self.loss_fn(pred-self.iif[self.variant],targets)
+                loss = self.loss_fcn(pred-self.iif[self.variant],targets)
+            elif (self.hybrid is True)|(self.hybrid_p is True):
+                if (self.hybrid_p is True):
+                    multiplicative_loss=torch.stack([weighted_probs[counter]*self.loss_fcn(pred*v[1],targets) \
+                                    for counter,v in enumerate(self.iif.items())],axis=0).sum(axis=0)
+                    additive_loss=torch.stack([weighted_probs[counter]*self.loss_fcn(pred+v[1],targets) \
+                                    for counter,v in enumerate(self.iif.items())],axis=0).sum(axis=0)
+                    loss = weighted_prob*multiplicative_loss + (1-weighted_prob)*additive_loss
+                else:
+                    loss = weighted_prob*(self.loss_fcn(pred*self.iif[self.variant],targets)) + \
+                           (1-weighted_prob)*(self.loss_fcn(pred+self.iif[self.variant],targets))
+                
             else:
-                loss = self.loss_fn(pred*self.iif[self.variant],targets)
+                loss = self.loss_fcn(pred*self.iif[self.variant],targets)
+#                 loss = torch.stack([weighted_prob[counter]*self.loss_fcn(pred*v[1],targets) \
+#                                     for counter,v in enumerate(self.iif.items())],axis=0).sum(axis=0)
 
             if self.reduction=='mean':
                 loss=loss.mean()
@@ -57,11 +92,43 @@ class IIFLoss(nn.Module):
                 loss=loss.sum()
             return loss
         else:
-            if self.log_adj is True:
-                return pred
+            if (self.hybrid is True)|(self.hybrid_p is True):
+                if (self.hybrid_p is True):
+                    multiplicative_logits=torch.stack([weighted_probs[counter]*pred*v[1] \
+                                    for counter,v in enumerate(self.iif.items())],axis=0).sum(axis=0)
+                    additive_logits=torch.stack([weighted_probs[counter]*(pred+v[1]) \
+                                    for counter,v in enumerate(self.iif.items())],axis=0).sum(axis=0)
+                    out = weighted_prob*multiplicative_logits + (1-weighted_prob)*additive_logits
+                else:
+                    out = (weighted_prob)*(pred*self.iif[self.variant])+(1-weighted_prob)*(pred+self.iif[self.variant])
             else:
-                out = (pred*self.iif[self.variant])
+                out = (pred+self.iif[self.variant])
             return out
+
+
+class TwoBranchLoss(nn.Module):
+    def __init__(self,criterion1,criterion2,total_epochs):
+        super(TwoBranchLoss,self).__init__()
+        self.loss_fn1 = criterion1
+        self.loss_fn2 = criterion2
+    
+    def forward(self, pred, targets=None,infer=False,epoch=0):
+        pred1,pred2=pred
+        if infer is False:
+            loss1 = self.loss_fn1(pred1,targets)
+            loss2 = self.loss_fn2(pred2,targets)
+            loss=loss1+loss2
+
+            return loss
+        else:
+            if hasattr(self.loss_fn1, 'iif'):
+                pred1=self.loss_fn1(pred1,infer=True)
+            if hasattr(self.loss_fn2, 'iif'):
+                pred2=self.loss_fn2(pred2,infer=True)
+            return (pred1+pred2)/2
+
+
+
 
 class GombitLoss(nn.Module):
     def __init__(self,num_classes,reduction='mean',device='cuda',weights=None):
@@ -113,14 +180,6 @@ class GaussianLoss(nn.Module):
 #         self.weights = torch.log(freqs.sum()/freqs).unsqueeze(0)
     def set_weights(self,weights):
         self.weights=weights
-        
-    def gaussian_cdf(self,input):
-        mu=0
-        sigma=1
-        x=(input-mu)/(2**(1/2)*sigma)
-        a=0.147
-        res= torch.sign(x)*(1-torch.exp(-(x**2)*((4/np.pi+a*(x**2))/(1+a*(x**2)))))**(1/2)
-        return (1+res)/2
         
     def forward(self, pred, targets):
         y_onehot = torch.cuda.FloatTensor(pred.shape)
@@ -505,7 +564,7 @@ class ContrastiveLoss(nn.Module):
 
             # loss =  self.loss_fn(logits,targets)
             loss =  self.loss_fn(logits[orig_mask],orig_targets)
-            loss=loss.mean()
+            # loss=loss.mean()
             total_loss =contrastive_loss + loss
             self.alpha  =1-(epoch/self.total_epochs)**2
             # total_loss = (1-self.alpha)*loss+(self.alpha)*contrastive_loss

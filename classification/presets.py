@@ -138,20 +138,12 @@ class SimpleAugment(object):
             transforms.ToTensor(),
             transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
         ])
-        self.transform_copy=transforms.Compose([
-            RandomGrayScale(),
-            transforms.ColorJitter(),
-            transforms.RandomCrop(32, padding=4),
-            transforms.RandomHorizontalFlip(),
-            transforms.ToTensor(),
-            transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
-        ])
-        self.auto_transform = transforms.Compose([
-            RandomGrayScale(),
-            transforms.RandomCrop(32, padding=4), # fill parameter needs torchvision installed from source
-            transforms.RandomHorizontalFlip(), CIFAR10Policy(), 
-            transforms.ToTensor(),
-            transforms.Normalize(mean=(0.4914, 0.4822, 0.4465), std=(0.2023, 0.1994, 0.2010))])
+        self.transform_copy=transforms.Compose(
+                        [transforms.RandomCrop(32, padding=4), # fill parameter needs torchvision installed from source
+                         transforms.RandomHorizontalFlip(), CIFAR10Policy(), 
+			             transforms.ToTensor(), 
+                         Cutout(n_holes=1, length=16), # (https://github.com/uoguelph-mlrg/Cutout/blob/master/util/cutout.py)
+                         transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))])
 
 
 
@@ -164,10 +156,8 @@ class SimpleAugment(object):
         else:
             transform_list=[sample1]
             for k in range(self.num_augments-1):
-                if k%2==0:
-                    transform_list.append(self.transform_copy(sample))
-                else:
-                    transform_list.append(self.auto_transform(sample))
+                transform_list.append(self.transform_copy(sample))
+
 
             return torch.stack(transform_list)
 
