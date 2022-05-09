@@ -82,59 +82,6 @@ class IMBALANCECIFAR100(IMBALANCECIFAR10):
     }
     cls_num = 100
     
-    
-class IMBALANCEImageNet(torchvision.datasets.ImageFolder):
-    cls_num = 1000
-
-    def __init__(self, root, imb_type='exp', imb_factor=0.01, rand_number=0,
-                 transform=None,target_transform=None):
-        super(IMBALANCEImageNet, self).__init__(root, transform,target_transform)
-        np.random.seed(rand_number)
-        img_num_list = self.get_img_num_per_cls(1000, imb_type, imb_factor)
-        self.gen_imbalanced_data(img_num_list)
-
-    def get_img_num_per_cls(self, cls_num, imb_type, imb_factor):
-        img_max = len(self.samples) / cls_num
-        img_num_per_cls = []
-        if imb_type == 'exp':
-            for cls_idx in range(cls_num):
-                num = img_max * (imb_factor**(cls_idx / (cls_num - 1.0)))
-                img_num_per_cls.append(int(num))
-        elif imb_type == 'step':
-            for cls_idx in range(cls_num // 2):
-                img_num_per_cls.append(int(img_max))
-            for cls_idx in range(cls_num // 2):
-                img_num_per_cls.append(int(img_max * imb_factor))
-        else:
-            img_num_per_cls.extend([int(img_max)] * cls_num)
-        return img_num_per_cls
-
-    def gen_imbalanced_data(self, img_num_per_cls):
-        new_data = []
-        new_targets = []
-        targets_np = np.array(self.targets, dtype=np.int64)
-        classes = np.unique(targets_np)
-        # np.random.shuffle(classes)
-        self.num_per_cls_dict = dict()
-        self.samples = np.array(self.samples)
-        for the_class, the_img_num in zip(classes, img_num_per_cls):
-            self.num_per_cls_dict[the_class] = the_img_num
-            idx = np.where(targets_np == the_class)[0]
-            np.random.shuffle(idx)
-            selec_idx = idx[:the_img_num]
-            
-            new_data.append(self.samples[selec_idx, ...])
-            new_targets.extend([the_class, ] * the_img_num)
-        new_data = np.vstack(new_data)
-        self.samples =  [(m[0],int(m[1])) for m in new_data ]
-        self.targets = new_targets
-        
-    def get_cls_num_list(self):
-        cls_num_list = []
-        for i in range(len(self.classes)):
-            cls_num_list.append(self.num_per_cls_dict[i])
-        return cls_num_list
-
 
 
 if __name__ == '__main__':
@@ -151,9 +98,9 @@ if __name__ == '__main__':
 
 
 class LT_Dataset(Dataset):
-    num_classes = 1000
 
-    def __init__(self, root, txt, transform=None):
+    def __init__(self, root, txt,num_classes, transform=None):
+        self.num_classes=num_classes
         self.img_path = []
         self.targets = []
         self.transform = transform
@@ -199,9 +146,9 @@ class LT_Dataset(Dataset):
 
 
 class LT_Dataset_Eval(Dataset):
-    num_classes = 1000
 
-    def __init__(self, root, txt, class_map, transform=None):
+    def __init__(self, root, txt, class_map,num_classes, transform=None):
+        self.num_classes=num_classes
         self.img_path = []
         self.targets = []
         self.transform = transform
@@ -227,16 +174,26 @@ class LT_Dataset_Eval(Dataset):
         return sample, target 
 
 
-def get_imagenet_lt(distributed, root="",auto_augment=None,sampler='random'):
+def get_dataset_lt(args,num_classes,train_txt,eval_txt):
 
-        
-    normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-    
-    if auto_augment=='imagenet':
+    distributed = args.distributed
+    root=args.data_path
+    auto_augment_policy = getattr(args, "auto_augment", None)
+    auto_augment=auto_augment_policy
+    sampler =  args.sampler
+    num_classes = num_classes
+    train_txt = train_txt
+    eval_txt = eval_txt
+
+    if args.dset_name =="inat18":
+        normalize = transforms.Normalize(mean=[0.466, 0.471, 0.380], std=[0.195, 0.194, 0.192])
+    else:
+        normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+
+    if args.dset_name=='inat18':
         transform_train = transforms.Compose([
             transforms.RandomResizedCrop(224),
             transforms.RandomHorizontalFlip(),
-            ImageNetPolicy(),
             transforms.ToTensor(),
             normalize,
             ])
@@ -245,6 +202,15 @@ def get_imagenet_lt(distributed, root="",auto_augment=None,sampler='random'):
             transforms.RandomResizedCrop(224),
             transforms.RandomHorizontalFlip(),
             transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4, hue=0),
+            transforms.ToTensor(),
+            normalize,
+            ])
+    
+    if auto_augment=='imagenet':
+        transform_train = transforms.Compose([
+            transforms.RandomResizedCrop(224),
+            transforms.RandomHorizontalFlip(),
+            ImageNetPolicy(),
             transforms.ToTensor(),
             normalize,
             ])
@@ -257,11 +223,10 @@ def get_imagenet_lt(distributed, root="",auto_augment=None,sampler='random'):
         ])
 
     
-    train_txt = "../../../datasets/ImageNet-LT/ImageNet_LT_train.txt"
-    eval_txt = "../../../datasets/ImageNet-LT/ImageNet_LT_test.txt"
+
     
-    train_dataset = LT_Dataset(root, train_txt, transform=transform_train)
-    eval_dataset = LT_Dataset_Eval(root, eval_txt, transform=transform_test, class_map=train_dataset.class_map)
+    train_dataset = LT_Dataset(root, train_txt,num_classes, transform=transform_train)
+    eval_dataset = LT_Dataset_Eval(root, eval_txt,train_dataset.class_map, num_classes, transform=transform_test)
 
     if distributed:
         if sampler=='random':

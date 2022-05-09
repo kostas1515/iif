@@ -3,7 +3,10 @@ from typing import Type, Any, Callable, Union, List, Optional
 import torch
 import torch.nn as nn
 from torch import Tensor
-import resnet_cifar
+try:
+    import resnet_cifar
+except ImportError:
+    from classification import resnet_cifar
 try:
     from torch.hub import load_state_dict_from_url  # noqa: 401
 except ImportError:
@@ -578,14 +581,25 @@ def resnet101(pretrained: bool = False, progress: bool = True, **kwargs: Any) ->
     return _resnet("resnet101", Bottleneck, [3, 4, 23, 3], pretrained, progress, **kwargs)
 
 
-def resnet152(pretrained: bool = False, progress: bool = True, **kwargs: Any) -> ResNet:
+def resnet152(pretrained: bool = False, progress: bool = True,use_norm: str = None,  **kwargs: Any) -> ResNet:
     r"""ResNet-152 model from
     `"Deep Residual Learning for Image Recognition" <https://arxiv.org/pdf/1512.03385.pdf>`_.
     Args:
         pretrained (bool): If True, returns a model pre-trained on ImageNet
         progress (bool): If True, displays a progress bar of the download to stderr
     """
-    return _resnet("resnet152", Bottleneck, [3, 8, 36, 3], pretrained, progress, **kwargs)
+    return _resnet("resnet152", Bottleneck, [3, 8, 36, 3], pretrained, progress,use_norm=use_norm, **kwargs)
+
+
+def se_resnet152(pretrained: bool = False, progress: bool = True,use_norm: str = None,  **kwargs: Any) -> ResNet:
+    r"""ResNet-152 model from
+    `"Deep Residual Learning for Image Recognition" <https://arxiv.org/pdf/1512.03385.pdf>`_.
+    Args:
+        pretrained (bool): If True, returns a model pre-trained on ImageNet
+        progress (bool): If True, displays a progress bar of the download to stderr
+    """
+    return _resnet('resnet152', SEBottleneck, [3, 8, 36, 3], pretrained, progress,use_norm=use_norm,
+                   **kwargs)
 
 
 def resnext50_32x4d(pretrained: bool = False, progress: bool = True,use_norm: str = None, **kwargs: Any) -> ResNet:

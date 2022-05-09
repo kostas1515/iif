@@ -65,16 +65,23 @@ def train_one_epoch(model, criterion, optimizer, data_loader, device, epoch, arg
     #     lr_scheduler = utils.warmup_lr_scheduler(optimizer, warmup_iters, warmup_factor)
     
     lincomb=LinearCombine(len(data_loader.dataset.classes),increase_factor=args.lincomb_if)
+    if args.mixup is not None:
+        mixup = custom.Mixup(criterion,alpha=args.mixup)
     for image, target in metric_logger.log_every(data_loader, print_freq, header):
         start_time = time.time()
         image, target = image.to(device), target.to(device)
         if args.schedule=='lincomb':
             image, target=lincomb(image, target)
+        if args.mixup is not None:
+            image, targets_a, targets_b, lam = mixup(image, target)
         output = model(image)
         if type(output)==tuple:
             loss = criterion(output, target,infer=False,epoch=epoch)
         else:
-            loss = criterion(output, target)
+            if args.mixup is not None:
+                loss = mixup.mixup_criterion(output,targets_a, targets_b, lam)
+            else:
+                loss = criterion(output, target)
         optimizer.zero_grad()
         if apex:
             with amp.scale_loss(loss, optimizer) as scaled_loss:
@@ -344,6 +351,8 @@ def get_args_parser(add_help=True):
     parser.add_argument('--schedule', default='normal', type=str, help='strategy of loss functions')
     parser.add_argument('--decoup',action="store_true", help='Freeze all layers except classif layer')
     parser.add_argument('--lincomb_if', default=1.0, type=float, help='LinearCombination factor, applicable if schedule:lincomb')
+    parser.add_argument('--mixup', default=None, type=float,
+                        help='Mixup factor')
     parser.add_argument('--sampler', default='random', type=str, help='sampling, [random,upsampling,downsampling]')
     parser.add_argument('--reduction', default='mean', type=str, help='reduce mini batch')
     parser.add_argument('--start-epoch', default=0, type=int, metavar='N',

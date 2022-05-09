@@ -1,19 +1,19 @@
 from typing import OrderedDict
 import torch
 import torch.nn as nn
-import imbalanced_dataset
-from torchvision.transforms import transforms
-import torchvision.datasets as datasets
+try:
+    import imbalanced_dataset
+    import presets
+except ImportError:
+    from classification import imbalanced_dataset
+    from classification import presets
+
 import os
 import numpy as np
 from scipy.special import ndtri,softmax
 from sklearn.feature_selection import chi2,mutual_info_classif,f_classif
 from sklearn.feature_selection import SelectKBest
 import torch.distributed as dist
-from catalyst.data import  BalanceClassSampler,DistributedSamplerWrapper
-import math
-import presets
-from randaugment import CIFAR10Policy
 
 class IIFLoss(nn.Module):
     # BCEwithLogitLoss() with reduced missing label effects.
@@ -103,6 +103,8 @@ class IIFLoss(nn.Module):
                     out = (weighted_prob)*(pred*self.iif[self.variant])+(1-weighted_prob)*(pred+self.iif[self.variant])
             else:
                 out = (pred+self.iif[self.variant])
+                # out = (pred)
+
             return out
 
 
@@ -127,6 +129,45 @@ class TwoBranchLoss(nn.Module):
                 pred2=self.loss_fn2(pred2,infer=True)
             return (pred1+pred2)/2
 
+
+
+class ADIIFLoss(nn.Module):
+    def __init__(self,reduction='mean',device='cuda',weight=None):
+        super(ADIIFLoss, self).__init__()
+        self.loss_fcn = nn.CrossEntropyLoss(reduction='none',weight=weight)
+        self.reduction=reduction
+        self.iif = 'adaptive'
+        
+#         freqs = torch.tensor(list(dataset.num_per_cls_dict.values()),device='cuda',dtype=torch.float)
+#         self.weights = torch.log(freqs.sum()/freqs).unsqueeze(0)
+
+    def set_weights(self,weights):
+        self.weights=weights
+
+    def forward(self,pred,targets=None,infer=False):
+            
+        w = -torch.log(torch.softmax(pred,dim=-1))
+        # w = torch.softmax(pred,dim=-1)
+        batch_w=[torch.zeros_like(w) for _ in range(dist.get_world_size())]
+        dist.all_gather(batch_w,w)
+        batch_w=torch.cat(batch_w,axis=0)
+        avg_w = batch_w.mean(axis=0).unsqueeze(0)
+        # print(avg_w)
+        # avg_w = -torch.log(batch_w.mean(axis=0).unsqueeze(0))
+
+        if infer is False:
+            loss = self.loss_fcn(pred*avg_w,targets)
+
+            if self.reduction=='mean':
+                loss=loss.mean()
+            elif self.reduction=='sum':
+                loss=loss.sum()/pred.shape[0]
+            return loss
+        else:
+
+            out = (pred*avg_w)
+
+            return out
 
 
 
@@ -232,8 +273,8 @@ class CELoss(nn.Module):
         if self.reduction=='mean':
             loss=loss.mean()
         elif self.reduction=='sum':
-#             loss=loss.sum()/targets.shape[0]
-            loss=loss.sum()
+            loss=loss.sum()/targets.shape[0]
+            # loss=loss.sum()
 
         return loss
     
@@ -345,80 +386,34 @@ class FocalLoss(nn.Module):
                 loss=loss.mean()
             
         return loss
-    
-def load_cifar(args):
-    
-    if args.contrastive_learning>0:
-        transform_train = transforms.Compose([presets.SimpleAugment(args.contrastive_learning)])
-    else:
-        auto_augment_policy = getattr(args, "auto_augment", None)
-        
-        if auto_augment_policy=='cifar':
-            transform_train=transforms.Compose(
-                        [transforms.RandomCrop(32, padding=4), # fill parameter needs torchvision installed from source
-                         transforms.RandomHorizontalFlip(), CIFAR10Policy(), 
-			             transforms.ToTensor(), 
-                         presets.Cutout(n_holes=1, length=16), # (https://github.com/uoguelph-mlrg/Cutout/blob/master/util/cutout.py)
-                         transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))])
+
+class Mixup(object):
+
+    def __init__(self,criterion, alpha=1):
+        self.alpha = alpha
+        self.criterion=criterion
+
+    def __call__(self, x, y, use_cuda=True):
+        '''Returns mixed inputs, pairs of targets, and lambda'''
+        if self.alpha > 0:
+            lam = np.random.beta(self.alpha, self.alpha)
         else:
-            transform_train = transforms.Compose([
-                transforms.RandomCrop(32, padding=4),
-                transforms.RandomHorizontalFlip(),
-                transforms.ToTensor(),
-                transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
-            ])
+            lam = 1
 
-
-    transform_val = transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
-    ])
-
-    if args.dset_name == 'cifar10':
-        train_dataset = imbalanced_dataset.IMBALANCECIFAR10(root='../../../datasets/',
-                                                            imb_type=args.imb_type, imb_factor=args.imb_factor,
-                                                            rand_number=args.rand_number, train=True, download=True, transform=transform_train)
-        val_dataset = datasets.CIFAR10(root='../../../datasets/', train=False, download=True, transform=transform_val)
-    elif args.dset_name == 'cifar100':
-        train_dataset = imbalanced_dataset.IMBALANCECIFAR100(root='../../../datasets/',
-                                                             imb_type=args.imb_type, imb_factor=args.imb_factor,
-                                                             rand_number=args.rand_number, train=True, download=True, transform=transform_train)
-        val_dataset = datasets.CIFAR100(root='../../../datasets/', train=False, download=True, transform=transform_val)
-    
-
-    print("Creating data loaders")
-    if args.distributed:
-        if args.sampler=='random':
-            train_sampler = torch.utils.data.distributed.DistributedSampler(
-                train_dataset)
-        elif args.sampler=='weighted':
-            class_weights = np.array(train_dataset.get_cls_num_list())
-
-            class_weights = (class_weights - class_weights.min()) / (class_weights.max() - class_weights.min())
-            class_weights = np.abs(class_weights-np.median(class_weights))
-            class_weights = 10**(-class_weights)
-            sample_weights = class_weights[train_dataset.targets]
-            weighted_sampler = torch.utils.data.WeightedRandomSampler(
-                weights=sample_weights,
-                num_samples=len(sample_weights),
-                replacement=True)
-            train_sampler= DistributedSamplerWrapper(weighted_sampler)
+        batch_size = x.size()[0]
+        if use_cuda:
+            index = torch.randperm(batch_size).cuda()
         else:
-            train_labels = train_dataset.targets
-            balanced_sampler = BalanceClassSampler(train_labels,mode=args.sampler)
-            train_sampler= DistributedSamplerWrapper(balanced_sampler)
+            index = torch.randperm(batch_size)
 
-        test_sampler = torch.utils.data.distributed.DistributedSampler(
-            val_dataset)
-    else:
-        if args.sampler=='random':
-            train_sampler = torch.utils.data.RandomSampler(train_dataset)
-        else:
-            train_labels = train_dataset.targets
-            train_sampler = BalanceClassSampler(train_labels,mode=args.sampler)
-        test_sampler = torch.utils.data.SequentialSampler(val_dataset)
+        mixed_x = lam * x + (1 - lam) * x[index, :]
+        y_a, y_b = y, y[index]
 
-    return train_dataset, val_dataset, train_sampler, test_sampler
+        return mixed_x, y_a, y_b, lam
+
+
+    def mixup_criterion(self, pred, y_a, y_b, lam):
+        return lam * self.criterion(pred, y_a) + (1 - lam) * self.criterion(pred, y_b)
 
 class LinearCombine(object):
     """Mix images
