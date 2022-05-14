@@ -509,26 +509,47 @@ class SEBottleneck(nn.Module):
 
         return out
 
+def _mismatched_classifier(model,arch,pretrained):
+    classifier_name, old_classifier = model._modules.popitem()
+    classifier_input_size = old_classifier.in_features
+    pretrained_classifier = nn.Linear(classifier_input_size, 1000)
+    model.add_module(classifier_name, pretrained_classifier)
+    if pretrained =='pytorch':
+        state_dict = load_state_dict_from_url(model_urls[arch], progress=False)
+        model.load_state_dict(state_dict)
+    else:
+        state_dict = torch.load(pretrained, map_location='cpu')
+        model.load_state_dict(state_dict['model'])
+
+    classifier_name, new_classifier = model._modules.popitem()
+    model.add_module(classifier_name, old_classifier)
+    return model
+
+
+
 def _resnet(
     arch: str,
     block: Type[Union[BasicBlock, Bottleneck]],
     layers: List[int],
-    pretrained: bool,
+    pretrained: str,
     progress: bool,
     use_norm: str,
     **kwargs: Any,
 ) -> ResNet:
     model = ResNet(block, layers,use_norm, **kwargs)
-    if pretrained:
-        state_dict = load_state_dict_from_url(model_urls[arch], progress=progress)
-        model.load_state_dict(state_dict)
+    if pretrained!='None':
+        if kwargs['num_classes']!=1000:
+            model = _mismatched_classifier(model,arch,pretrained)
+        else:
+            state_dict = load_state_dict_from_url(model_urls[arch], progress=progress)
+            model.load_state_dict(state_dict)
     return model
 
 def _tb_resnet(
     arch: str,
     block: Type[Union[BasicBlock, Bottleneck]],
     layers: List[int],
-    pretrained: bool,
+    pretrained: str,
     progress: bool,
     use_norm: str,
     **kwargs: Any,
@@ -557,7 +578,7 @@ def resnet34(pretrained: bool = False, progress: bool = True, **kwargs: Any) -> 
     return _resnet("resnet34", BasicBlock, [3, 4, 6, 3], pretrained, progress, **kwargs)
 
 
-def resnet50(pretrained: bool = False, progress: bool = True,use_norm: str = None, **kwargs: Any) -> ResNet:
+def resnet50(pretrained: str = None, progress: bool = True,use_norm: str = None, **kwargs: Any) -> ResNet:
     r"""ResNet-50 model from
     `"Deep Residual Learning for Image Recognition" <https://arxiv.org/pdf/1512.03385.pdf>`_.
     Args:
@@ -567,7 +588,7 @@ def resnet50(pretrained: bool = False, progress: bool = True,use_norm: str = Non
     return _resnet("resnet50", Bottleneck, [3, 4, 6, 3], pretrained, progress,use_norm=use_norm, **kwargs)
 
 
-def tb_resnet50(pretrained: bool = False, progress: bool = True,use_norm: str = None, **kwargs: Any) -> ResNet:
+def tb_resnet50(pretrained: str = None, progress: bool = True,use_norm: str = None, **kwargs: Any) -> ResNet:
 
     return _tb_resnet("resnet50", Bottleneck, [3, 4, 6, 3], pretrained, progress,use_norm=use_norm, **kwargs)
 
@@ -581,7 +602,7 @@ def resnet101(pretrained: bool = False, progress: bool = True, **kwargs: Any) ->
     return _resnet("resnet101", Bottleneck, [3, 4, 23, 3], pretrained, progress, **kwargs)
 
 
-def resnet152(pretrained: bool = False, progress: bool = True,use_norm: str = None,  **kwargs: Any) -> ResNet:
+def resnet152(pretrained: str = None, progress: bool = True,use_norm: str = None,  **kwargs: Any) -> ResNet:
     r"""ResNet-152 model from
     `"Deep Residual Learning for Image Recognition" <https://arxiv.org/pdf/1512.03385.pdf>`_.
     Args:
@@ -591,7 +612,7 @@ def resnet152(pretrained: bool = False, progress: bool = True,use_norm: str = No
     return _resnet("resnet152", Bottleneck, [3, 8, 36, 3], pretrained, progress,use_norm=use_norm, **kwargs)
 
 
-def se_resnet152(pretrained: bool = False, progress: bool = True,use_norm: str = None,  **kwargs: Any) -> ResNet:
+def se_resnet152(pretrained: str = None, progress: bool = True,use_norm: str = None,  **kwargs: Any) -> ResNet:
     r"""ResNet-152 model from
     `"Deep Residual Learning for Image Recognition" <https://arxiv.org/pdf/1512.03385.pdf>`_.
     Args:
@@ -602,7 +623,7 @@ def se_resnet152(pretrained: bool = False, progress: bool = True,use_norm: str =
                    **kwargs)
 
 
-def resnext50_32x4d(pretrained: bool = False, progress: bool = True,use_norm: str = None, **kwargs: Any) -> ResNet:
+def resnext50_32x4d(pretrained: str = None, progress: bool = True,use_norm: str = None, **kwargs: Any) -> ResNet:
     r"""ResNeXt-50 32x4d model from
     `"Aggregated Residual Transformation for Deep Neural Networks" <https://arxiv.org/pdf/1611.05431.pdf>`_.
     Args:
@@ -656,12 +677,12 @@ def wide_resnet101_2(pretrained: bool = False, progress: bool = True, **kwargs: 
     return _resnet("wide_resnet101_2", Bottleneck, [3, 4, 23, 3], pretrained, progress, **kwargs)
 
 
-def se_resnet50(pretrained=False, progress=True,use_norm=None, **kwargs):
+def se_resnet50(pretrained=None, progress=True,use_norm=None, **kwargs):
     return _resnet('resnet50', SEBottleneck, [3, 4, 6, 3], pretrained, progress,use_norm=use_norm,
                    **kwargs)
 
 
-def se_resnext50_32x4d(pretrained: bool = False, progress: bool = True,use_norm: str = None, **kwargs: Any) -> ResNet:
+def se_resnext50_32x4d(pretrained: str = None, progress: bool = True,use_norm: str = None, **kwargs: Any) -> ResNet:
     r"""ResNeXt-50 32x4d model from
     `"Aggregated Residual Transformation for Deep Neural Networks" <https://arxiv.org/pdf/1611.05431.pdf>`_.
     Args:

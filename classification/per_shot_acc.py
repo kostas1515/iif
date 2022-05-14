@@ -10,9 +10,18 @@ from itertools import chain
 from apex import amp
 
 def main(args):
-    auto_augment_policy = getattr(args, "auto_augment", None)
-    dataset, dataset_test, _, test_sampler = imbalanced_dataset.get_imagenet_lt(False, root=args.root,
-                              auto_augment=auto_augment_policy,sampler = args.sampler)
+    dset_name = args.dset_name
+    if dset_name =='imagenet_lt':
+        num_classes=1000
+        num_classes = 1000
+        train_txt = "../../../datasets/ImageNet-LT/ImageNet_LT_train.txt"
+        eval_txt = "../../../datasets/ImageNet-LT/ImageNet_LT_test.txt"
+    else:
+        num_classes = 365
+        train_txt = "../../../datasets/places365_standard/Places_LT_train.txt"
+        eval_txt = "../../../datasets/places365_standard/Places_LT_test.txt"
+
+    dataset, dataset_test, _, test_sampler = imbalanced_dataset.get_dataset_lt(args,num_classes,train_txt,eval_txt)  
     num_classes = len(dataset.cls_num_list)
 
     data_loader_test = torch.utils.data.DataLoader(
@@ -137,9 +146,10 @@ def evaluate(model, criterion, data_loader, device, print_freq=10):
 
 def get_args_parser():
     parser = argparse.ArgumentParser(description='Parse arguments for per shot acc.')
-
+    parser.add_argument('--distributed', default=False)
+    parser.add_argument('--dset_name', default='imagenet_lt',type=str, help='Dataset Name imagenet_lt|places')
     parser.add_argument(
-        '--root', default='../../../datasets/ILSVRC/Data/CLS-LOC/', help='dataset')
+        '--data-path', default='../../../datasets/ILSVRC/Data/CLS-LOC/', help='dataset')
     parser.add_argument('--auto-augment', default=None,
                         help='auto augment policy (default: None)')
     parser.add_argument('--sampler', default='random', type=str, help='sampling, [random,upsampling,downsampling]')

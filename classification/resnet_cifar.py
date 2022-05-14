@@ -50,7 +50,7 @@ class NormedLinear(nn.Module):
 class CosNorm_Classifier(nn.Module):
     def __init__(self, in_dims, out_dims, scale=16, margin=0.5, init_std=0.001):
         super(CosNorm_Classifier, self).__init__()
-        self.in_dims = in_dims
+        self.in_features = in_dims
         self.out_dims = out_dims
         self.scale = scale
         self.margin = margin

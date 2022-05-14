@@ -181,7 +181,7 @@ def main(args):
     print("Creating model")
     try:
         # model = torchvision.models.__dict__[args.model](pretrained=args.pretrained,num_classes=num_classes)
-        model = eval(f'resnet_pytorch.{args.model}(num_classes={num_classes},use_norm="{args.classif_norm}")')
+        model = eval(f'resnet_pytorch.{args.model}(num_classes={num_classes},use_norm="{args.classif_norm}",pretrained="{args.pretrained}")')
     except AttributeError:
         #model does not exist in pytorch load it from resnet_cifar
         model = eval(f'resnet_cifar.{args.model}(num_classes={num_classes},use_norm="{args.classif_norm}")')
@@ -378,8 +378,8 @@ def get_args_parser(add_help=True):
     parser.add_argument(
         "--pretrained",
         dest="pretrained",
-        help="Use pre-trained models from the modelzoo",
-        action="store_true",
+        help="Use pre-trained models from the modelzoo or local --> [pytorch, path-to-model]",
+        default=None, type=str,
     )
     parser.add_argument(
         "--deffered",

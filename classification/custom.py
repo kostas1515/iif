@@ -103,7 +103,6 @@ class IIFLoss(nn.Module):
                     out = (weighted_prob)*(pred*self.iif[self.variant])+(1-weighted_prob)*(pred+self.iif[self.variant])
             else:
                 out = (pred+self.iif[self.variant])
-                # out = (pred)
 
             return out
 
