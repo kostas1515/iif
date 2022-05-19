@@ -164,6 +164,35 @@ def select_training_param(model):
 
     return model
 
+
+def finetune_places(model):
+#     print(model)
+    for v in model.parameters():
+        v.requires_grad = False
+    try:
+        torch.nn.init.xavier_uniform_(model.linear.weight)
+        model.linear.weight.requires_grad = True
+        try:
+            model.linear.bias.data.fill_(0.01)
+            model.linear.bias.requires_grad = True
+        except torch.nn.modules.module.ModuleAttributeError:
+            pass
+    except torch.nn.modules.module.ModuleAttributeError:
+        torch.nn.init.xavier_uniform_(model.fc.weight)
+        try:
+            model.fc.bias.requires_grad = True
+            model.fc.bias.data.fill_(0.01)
+        except torch.nn.modules.module.ModuleAttributeError:
+            pass
+        model.fc.weight.requires_grad = True
+    
+    for v in model.layer4[-1].parameters():
+        v.requires_grad = True
+        
+
+    return model
+
+
 def main(args):
     if args.apex and amp is None:
         raise RuntimeError("Failed to import apex. Please install apex from https://www.github.com/nvidia/apex "
@@ -218,6 +247,9 @@ def main(args):
 
     if args.decoup:
         model = select_training_param(model)
+
+    if args.dset_name == 'places_lt':
+        model = finetune_places(model)
     
     if args.cosine_scheduler:
         lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
