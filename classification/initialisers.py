@@ -4,7 +4,6 @@ import numpy as np
 import presets
 import imbalanced_dataset
 import os
-import time
 import utils
 import torchvision
 import torchvision.transforms as transforms
@@ -27,19 +26,6 @@ def get_criterion(args,dataset,model,num_classes):
         else:
             weight=None
         criterion = custom.IIFLoss(dataset,variant=args.iif,iif_norm=args.iif_norm,reduction=args.reduction,weight=weight)
-    elif (args.classif== 'gombit'):
-        if args.deffered:
-            weight=get_weights(dataset)
-        else:
-            weight=None
-        criterion = custom.GombitLoss(len(dataset.classes),reduction=args.reduction,weights=weight)
-        # torch.nn.init.constant_(model.linear.bias.data,np.log(np.log(1+1/(num_classes-1))))
-        try:
-            torch.nn.init.constant_(model.linear.bias.data,-np.log(np.log(num_classes)))
-        except torch.nn.modules.module.ModuleAttributeError:
-            print('Warning cannot set bias value for classifier')
-            pass
-        torch.nn.init.normal_(model.linear.weight.data,0.0,0.001)
     elif (args.classif== 'bce'):
         if args.deffered:
             weight=get_weights(dataset)
@@ -56,46 +42,12 @@ def get_criterion(args,dataset,model,num_classes):
         criterion = custom.FocalLoss(gamma=args.gamma,alpha=args.alpha,reduction=args.reduction,feat_select=args.feat_select,weights=weight)
         torch.nn.init.constant_(model.linear.bias.data,-6.5)
         torch.nn.init.normal_(model.linear.weight.data,0.0,0.001)
-    elif (args.classif== 'ce_loss'):
-        if args.deffered:
-            weight=get_weights(dataset)
-        else:
-            weight=None
-        criterion = custom.CELoss(feat_select=args.feat_select,weights=weight,reduction=args.reduction)
-    elif (args.classif== 'gaussian'):
-        if args.deffered:
-            weight=get_weights(dataset)
-        else:
-            weight=None
-        criterion = custom.GaussianLoss(len(dataset.classes),reduction=args.reduction,weights=weight)
-        torch.nn.init.constant_(model.linear.bias.data,-2)
-        torch.nn.init.normal_(model.linear.weight.data,0.0,0.001)
-    elif (args.classif== 'multiactivation'):
-        if args.deffered:
-            weight=get_weights(dataset)
-        else:
-            weight=None
-        criterion = custom.MultiActivationLoss(len(dataset.classes),reduction=args.reduction,weights=weight)
-        torch.nn.init.constant_(model.linear.bias.data,-2)
-        torch.nn.init.normal_(model.linear.weight.data,0.0,0.001)
-    elif (args.classif== 'adiif'):
-        if args.deffered:
-            weight=get_weights(dataset)
-        else:
-            weight=None
-        criterion = custom.ADIIFLoss(reduction=args.reduction,weight=weight)
     else:
         if args.deffered:
             weight=get_weights(dataset)
         else:
             weight=None
         criterion = torch.nn.CrossEntropyLoss(weight=weight,reduction=args.reduction)
-
-    if args.contrastive_learning>0:
-        criterion = custom.ContrastiveLoss(criterion,args.contrastive_learning,total_epochs=args.epochs)
-
-    if args.tbl is True:
-        criterion = custom.TwoBranchLoss(torch.nn.CrossEntropyLoss(),criterion,total_epochs=args.epochs)
 
     return criterion
 
@@ -154,14 +106,10 @@ def get_data(args):
         dataset, dataset_test, train_sampler, test_sampler = load_cifar(args)
         num_classes = len(dataset.num_per_cls_dict)
     
-    if args.contrastive_learning>0:
-        data_loader = torch.utils.data.DataLoader(
-            dataset, batch_size=args.batch_size,
-            sampler=train_sampler, num_workers=args.workers, pin_memory=True,collate_fn=presets.my_collate)
-    else:
-        data_loader = torch.utils.data.DataLoader(
-            dataset, batch_size=args.batch_size,
-            sampler=train_sampler, num_workers=args.workers, pin_memory=True)
+
+    data_loader = torch.utils.data.DataLoader(
+        dataset, batch_size=args.batch_size,
+        sampler=train_sampler, num_workers=args.workers, pin_memory=True)
 
     data_loader_test = torch.utils.data.DataLoader(
         dataset_test, batch_size=args.batch_size,
@@ -182,7 +130,7 @@ def load_cifar(args):
             transform_train=transforms.Compose(
                         [transforms.RandomCrop(32, padding=4), # fill parameter needs torchvision installed from source
                          transforms.RandomHorizontalFlip(), CIFAR10Policy(), 
-			             transforms.ToTensor(), 
+                         transforms.ToTensor(), 
                          presets.Cutout(n_holes=1, length=16), # (https://github.com/uoguelph-mlrg/Cutout/blob/master/util/cutout.py)
                          transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))])
         else:

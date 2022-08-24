@@ -58,30 +58,20 @@ def train_one_epoch(model, criterion, optimizer, data_loader, device, epoch, arg
 
         lr_scheduler = utils.warmup_lr_scheduler(optimizer, warmup_iters, warmup_factor)
         
-    # if epoch ==5:
-    #     warmup_factor = 1. / 1000
-    #     warmup_iters = min(1000, len(data_loader) - 1)
-
-    #     lr_scheduler = utils.warmup_lr_scheduler(optimizer, warmup_iters, warmup_factor)
-    
-    lincomb=LinearCombine(len(data_loader.dataset.classes),increase_factor=args.lincomb_if)
     if args.mixup is not None:
         mixup = custom.Mixup(criterion,alpha=args.mixup)
     for image, target in metric_logger.log_every(data_loader, print_freq, header):
         start_time = time.time()
         image, target = image.to(device), target.to(device)
-        if args.schedule=='lincomb':
-            image, target=lincomb(image, target)
+        
         if args.mixup is not None:
             image, targets_a, targets_b, lam = mixup(image, target)
         output = model(image)
-        if type(output)==tuple:
-            loss = criterion(output, target,infer=False,epoch=epoch)
+
+        if args.mixup is not None:
+            loss = mixup.mixup_criterion(output,targets_a, targets_b, lam)
         else:
-            if args.mixup is not None:
-                loss = mixup.mixup_criterion(output,targets_a, targets_b, lam)
-            else:
-                loss = criterion(output, target)
+            loss = criterion(output, target)
         optimizer.zero_grad()
         if apex:
             with amp.scale_loss(loss, optimizer) as scaled_loss:
@@ -90,10 +80,8 @@ def train_one_epoch(model, criterion, optimizer, data_loader, device, epoch, arg
             loss.backward()
         optimizer.step()
         
-        if type(output)==tuple:
-            acc1, acc5 = utils.accuracy(output[0], target, topk=(1, 5))
-        else:
-            acc1, acc5 = utils.accuracy(output, target, topk=(1, 5))
+
+        acc1, acc5 = utils.accuracy(output, target, topk=(1, 5))
         batch_size = image.shape[0]
         
         if lr_scheduler is not None:
@@ -116,14 +104,9 @@ def evaluate(model, criterion, data_loader, device, print_freq=100):
             image = image.to(device, non_blocking=True)
             target = target.to(device, non_blocking=True)
             output = model(image)
-#             loss = criterion(output, target)
-            if (type(output)==tuple):
-                out=criterion(output,infer=True)
-                acc1, acc5 = utils.accuracy(out, target, topk=(1, 5))
-            else:
-                if hasattr(criterion, 'iif'):
-                    output=criterion(output,infer=True)
-                acc1, acc5 = utils.accuracy(output, target, topk=(1, 5))
+            if hasattr(criterion, 'iif'):
+                output=criterion(output,infer=True)
+            acc1, acc5 = utils.accuracy(output, target, topk=(1, 5))
             
             # FIXME need to take into account that the datasets
             # could have been padded in distributed setup
@@ -209,7 +192,6 @@ def main(args):
     dataset,num_classes,data_loader,data_loader_test,train_sampler= initialisers.get_data(args)
     print("Creating model")
     try:
-        # model = torchvision.models.__dict__[args.model](pretrained=args.pretrained,num_classes=num_classes)
         model = eval(f'resnet_pytorch.{args.model}(num_classes={num_classes},use_norm="{args.classif_norm}",pretrained="{args.pretrained}")')
     except AttributeError:
         #model does not exist in pytorch load it from resnet_cifar
@@ -222,10 +204,7 @@ def main(args):
     criterion=initialisers.get_criterion(args,dataset,model,num_classes)
 
     opt_name = args.opt.lower()
-    if (args.classif== 'multiactivation')|((args.classif== 'iif')&((args.iif== 'hybrid')|(args.iif== 'hybrid_p'))):
-        model_parameters=list(model.parameters())+list(criterion.parameters())
-    else: 
-        model_parameters=model.parameters()
+    model_parameters=model.parameters()
 
     if opt_name == 'sgd':
         optimizer = torch.optim.SGD(
@@ -248,8 +227,6 @@ def main(args):
     if args.decoup:
         model = select_training_param(model)
 
-#     if args.dset_name == 'places_lt':
-#         model = finetune_places(model)
     
     if args.cosine_scheduler:
         lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
@@ -285,24 +262,6 @@ def main(args):
     start_time = time.time()
     best_acc = 0
     for epoch in range(args.start_epoch, args.epochs):
-        if (epoch>=args.milestones[0]):
-            if args.schedule=='lincomb':
-                args.schedule='iif'
-        if epoch>=args.milestones[1]:
-            if args.schedule=='cost':
-                per_cls_weights = torch.tensor(dataset.get_cls_num_list(),device='cuda')
-                per_cls_weights = per_cls_weights.sum()/per_cls_weights
-                if args.classif=='ce':
-                    criterion = custom.CELoss(feat_select=args.feat_select,weights=per_cls_weights) 
-                else:
-                    criterion.set_weights(per_cls_weights)  
-            elif args.schedule=='iif':
-#                 per_cls_weights = torch.tensor(dataset.get_cls_num_list(),device='cuda')
-#                 per_cls_weights = per_cls_weights.sum()/per_cls_weights
-                # model.module = select_training_param(model.module)
-                criterion = custom.IIFLoss(dataset,variant=args.iif,iif_norm=args.iif_norm,reduction=args.reduction)
-                
-        
         if args.distributed:
             train_sampler.set_epoch(epoch)
         train_one_epoch(model, criterion, optimizer, data_loader,
@@ -333,7 +292,6 @@ def main(args):
         if utils.is_main_process():
             record_result(best_acc,args)
     
-
 
 def get_args_parser(add_help=True):
     import argparse
@@ -379,10 +337,7 @@ def get_args_parser(add_help=True):
     parser.add_argument('--alpha', default=None,type=float, help='Focal loss alpha hp')
     parser.add_argument('--iif', default='raw',type=str, help='Type of IIF variant- applicable if classif iif')
     parser.add_argument('--iif_norm', default=0, type=int, help='IIF norm')
-    parser.add_argument('--feat_select', default=None, type=str, help='pick either chi2 or mutual_info_classif') #stage experimental, maybe not usefull
-    parser.add_argument('--schedule', default='normal', type=str, help='strategy of loss functions')
     parser.add_argument('--decoup',action="store_true", help='Freeze all layers except classif layer')
-    parser.add_argument('--lincomb_if', default=1.0, type=float, help='LinearCombination factor, applicable if schedule:lincomb') 
     parser.add_argument('--mixup', default=None, type=float,
                         help='Mixup factor')
     parser.add_argument('--sampler', default='random', type=str, help='sampling, [random,upsampling,downsampling]')
@@ -420,12 +375,6 @@ def get_args_parser(add_help=True):
     )
     parser.add_argument('--auto-augment', default=None,
                         help='auto augment policy (default: None)')
-
-    parser.add_argument('--contrastive_learning', default=0,type=int,
-                        help='Use contrastive learning')
-
-    parser.add_argument('--tbl', action="store_true",
-                        help='Use two branch network')
 
     parser.add_argument('--random-erase', default=0.0, type=float,
                         help='random erasing probability (default: 0.0)')
