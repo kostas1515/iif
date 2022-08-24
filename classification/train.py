@@ -248,8 +248,8 @@ def main(args):
     if args.decoup:
         model = select_training_param(model)
 
-    if args.dset_name == 'places_lt':
-        model = finetune_places(model)
+#     if args.dset_name == 'places_lt':
+#         model = finetune_places(model)
     
     if args.cosine_scheduler:
         lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
@@ -377,12 +377,12 @@ def get_args_parser(add_help=True):
     parser.add_argument('--classif_norm', default=None,type=str, help='Type of classifier Normalisation {None,norm,cosine')
     parser.add_argument('--gamma', default=2.0,type=float, help='Focal loss gamma hp')
     parser.add_argument('--alpha', default=None,type=float, help='Focal loss alpha hp')
-    parser.add_argument('--iif', default='raw',type=str, help='Type of IIF variant')
+    parser.add_argument('--iif', default='raw',type=str, help='Type of IIF variant- applicable if classif iif')
     parser.add_argument('--iif_norm', default=0, type=int, help='IIF norm')
-    parser.add_argument('--feat_select', default=None, type=str, help='pick either chi2 or mutual_info_classif')
+    parser.add_argument('--feat_select', default=None, type=str, help='pick either chi2 or mutual_info_classif') #stage experimental, maybe not usefull
     parser.add_argument('--schedule', default='normal', type=str, help='strategy of loss functions')
     parser.add_argument('--decoup',action="store_true", help='Freeze all layers except classif layer')
-    parser.add_argument('--lincomb_if', default=1.0, type=float, help='LinearCombination factor, applicable if schedule:lincomb')
+    parser.add_argument('--lincomb_if', default=1.0, type=float, help='LinearCombination factor, applicable if schedule:lincomb') 
     parser.add_argument('--mixup', default=None, type=float,
                         help='Mixup factor')
     parser.add_argument('--sampler', default='random', type=str, help='sampling, [random,upsampling,downsampling]')
