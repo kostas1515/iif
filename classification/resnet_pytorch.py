@@ -211,6 +211,8 @@ class ResNet(nn.Module):
         self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
         if use_norm=='cosine':
             self.fc = resnet_cifar.CosNorm_Classifier(512 * block.expansion, num_classes)
+        elif use_norm=='lr_cosine':
+            self.fc = resnet_cifar.CosNorm_Classifier(512 * block.expansion, num_classes,lr_scale=True)
         elif use_norm=='norm':
             self.fc = resnet_cifar.NormedLinear(512 * block.expansion, num_classes)
         else:

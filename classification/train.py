@@ -146,7 +146,6 @@ def select_training_param(model):
 
 
 def finetune_places(model):
-#     print(model)
     for v in model.parameters():
         v.requires_grad = False
 
@@ -215,8 +214,8 @@ def main(args):
                                           opt_level=args.apex_opt_level
                                           )
 
-    if args.dset_name == 'places_lt':
-        model = finetune_places(model)
+#     if args.dset_name == 'places_lt':
+#         model = finetune_places(model)
         
     if args.decoup:
         model = select_training_param(model)
@@ -231,7 +230,7 @@ def main(args):
     model_without_ddp = model
     if args.distributed:
         model = torch.nn.parallel.DistributedDataParallel(
-            model, device_ids=[args.gpu],find_unused_parameters=True)
+            model, device_ids=[args.gpu])
         model_without_ddp = model.module
 
     if args.resume:

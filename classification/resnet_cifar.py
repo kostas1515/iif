@@ -48,11 +48,15 @@ class NormedLinear(nn.Module):
         return out
 
 class CosNorm_Classifier(nn.Module):
-    def __init__(self, in_dims, out_dims, scale=16, margin=0.5, init_std=0.001):
+    def __init__(self, in_dims, out_dims, scale=16, margin=0.5, init_std=0.001,lr_scale=False):
         super(CosNorm_Classifier, self).__init__()
         self.in_features = in_dims
         self.out_dims = out_dims
-        self.scale = scale
+        self.lr_scale = lr_scale
+        if self.lr_scale is True:
+            self.scale = Parameter(5.0*torch.ones(1,device='cuda'))
+        else:
+            self.scale = scale
         self.margin = margin
         self.weight = Parameter(torch.Tensor(out_dims, in_dims).cuda())
         self.reset_parameters() 
@@ -67,7 +71,11 @@ class CosNorm_Classifier(nn.Module):
         ex = (norm_x / (1 + norm_x)) * (input / norm_x)
         # ex = input/ (1 + norm_x)
         ew = self.weight / torch.norm(self.weight, 2, 1, keepdim=True)
-        return torch.mm(self.scale * ex, ew.t())
+        
+        if self.lr_scale is True:
+            return torch.mm((self.scale**2) * ex, ew.t())
+        else:
+            return torch.mm(self.scale * ex, ew.t())
 
 class LambdaLayer(nn.Module):
 
@@ -176,6 +184,8 @@ class ResNet_s(nn.Module):
         self.layer3 = self._make_layer(block, 64, num_blocks[2], stride=2)
         if use_norm=='norm':
             self.linear = NormedLinear(64, num_classes)
+        elif use_norm=='lr_cosine':
+            self.linear = CosNorm_Classifier(64, num_classes,lr_scale=True)
         elif use_norm=='cosine':
             self.linear = CosNorm_Classifier(64, num_classes)
         else:

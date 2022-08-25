@@ -34,7 +34,7 @@ python -m torch.distributed.launch --nproc_per_node=4 --use_env  train.py --dset
 
 ### CIFAR100-LT classifier learning with IIF
 ```
-python -m torch.distributed.launch --nproc_per_node=4 --use_env  train.py --dset_name=cifar100 --imb_factor 0.01 --model se_resnet32 --output-dir ../checkpoints/se_r32_c100_ce_mean_decoup -b 16 --reduction mean --epochs 20 --wd 0.0001 --classif_norm cosine --mixup 0.2 --auto-augment cifar --load_from ../checkpoints/se_r32_c100_ce_mean/model_399.pth --lr 0.0001 --classif iif --iif smooth --decoup
+python -m torch.distributed.launch --nproc_per_node=4 --use_env  train.py --dset_name=cifar100 --imb_factor 0.01 --model se_resnet32 --output-dir ../checkpoints/se_r32_c100_ce_mean_decoup -b 16 --reduction mean --epochs 20 --wd 0.0001 --classif_norm cosine --auto-augment cifar --load_from ../checkpoints/se_r32_c100_ce_mean/model_399.pth --lr 0.0001 --classif iif --iif smooth --decoup
 ```
 
 ### CIFAR100-LT post-process IIF
