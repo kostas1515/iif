@@ -1,0 +1,352 @@
+2022-08-25 18:16:18,574 - mmdet - INFO - Environment info:
+------------------------------------------------------------
+sys.platform: linux
+Python: 3.8.12 (default, Oct 12 2021, 13:02:29) [GCC 7.3.0]
+CUDA available: True
+GPU 0,1,2,3: Tesla V100-SXM2-32GB
+CUDA_HOME: /opt/software/builder/developers/compilers/cuda/10.2.89/1/default
+NVCC: Cuda compilation tools, release 10.2, V10.2.89
+GCC: gcc (GCC) 8.4.0
+PyTorch: 1.7.1
+PyTorch compiling details: PyTorch built with:
+  - GCC 7.3
+  - C++ Version: 201402
+  - OpenMP 201511 (a.k.a. OpenMP 4.5)
+  - CPU capability usage: NO AVX
+  - CUDA Runtime 10.2
+  - NVCC architecture flags: -gencode;arch=compute_37,code=sm_37;-gencode;arch=compute_60,code=sm_60;-gencode;arch=compute_70,code=sm_70;-gencode;arch=compute_75,code=sm_75
+  - CuDNN 7.6.5
+  - Magma 2.5.4
+  - Build settings: BLAS=OpenBLAS, BUILD_TYPE=Release, CXX_FLAGS=-fvisibility-inlines-hidden -fmessage-length=0 -mcpu=power8 -mtune=power8 -mpower8-fusion -mpower8-vector -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O3 -pipe -I/home/florin/anaconda3/envs/open-ce/conda-bld/pytorch-base_1614672317903/_h_env_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_place/include -fdebug-prefix-map=/home/florin/anaconda3/envs/open-ce/conda-bld/pytorch-base_1614672317903/work=/usr/local/src/conda/pytorch-base-1.7.1 -fdebug-prefix-map=/home/florin/anaconda3/envs/open-ce/conda-bld/pytorch-base_1614672317903/_h_env_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_place=/usr/local/src/conda-prefix -D__STDC_FORMAT_MACROS -I/home/florin/anaconda3/envs/open-ce/conda-bld/pytorch-base_1614672317903/_h_env_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_place/include -I/usr/local/cuda-10.2//include -I/home/florin/anaconda3/envs/open-ce/conda-bld/pytorch-base_1614672317903/_build_env/include -Wno-deprecated -fvisibility-inlines-hidden -fopenmp -DNDEBUG -DUSE_VULKAN_WRAPPER -O2 -fPIC -Wno-narrowing -Wall -Wextra -Werror=return-type -Wno-missing-field-initializers -Wno-type-limits -Wno-array-bounds -Wno-unknown-pragmas -Wno-sign-compare -Wno-unused-parameter -Wno-unused-variable -Wno-unused-function -Wno-unused-result -Wno-unused-local-typedefs -Wno-strict-overflow -Wno-strict-aliasing -Wno-error=deprecated-declarations -Wno-stringop-overflow -Wno-psabi -Wno-error=pedantic -Wno-error=redundant-decls -Wno-error=old-style-cast -fdiagnostics-color=always -faligned-new -Wno-unused-but-set-variable -Wno-maybe-uninitialized -fno-math-errno -fno-trapping-math -Werror=format -Wno-stringop-overflow, USE_CUDA=1, USE_EXCEPTION_PTR=1, USE_GFLAGS=OFF, USE_GLOG=OFF, USE_MKLDNN=OFF, USE_MPI=OFF, USE_NCCL=ON, USE_NNPACK=0, USE_OPENMP=1, 
+
+TorchVision: 0.8.2
+OpenCV: 4.5.5
+MMCV: 1.3.8
+MMCV Compiler: GCC 8.4
+MMCV CUDA Compiler: 10.2
+MMDetection: 2.16.0+e68bc71
+------------------------------------------------------------
+
+2022-08-25 18:16:20,415 - mmdet - INFO - Distributed training: True
+2022-08-25 18:16:22,240 - mmdet - INFO - Config:
+model = dict(
+    type='MaskRCNN',
+    backbone=dict(
+        type='ResNet',
+        depth=50,
+        num_stages=4,
+        out_indices=(0, 1, 2, 3),
+        frozen_stages=1,
+        norm_cfg=dict(type='BN', requires_grad=True),
+        norm_eval=True,
+        style='pytorch',
+        init_cfg=dict(type='Pretrained', checkpoint='torchvision://resnet50')),
+    neck=dict(
+        type='FPN',
+        in_channels=[256, 512, 1024, 2048],
+        out_channels=256,
+        num_outs=5),
+    rpn_head=dict(
+        type='RPNHead',
+        in_channels=256,
+        feat_channels=256,
+        anchor_generator=dict(
+            type='AnchorGenerator',
+            scales=[8],
+            ratios=[0.5, 1.0, 2.0],
+            strides=[4, 8, 16, 32, 64]),
+        bbox_coder=dict(
+            type='DeltaXYWHBBoxCoder',
+            target_means=[0.0, 0.0, 0.0, 0.0],
+            target_stds=[1.0, 1.0, 1.0, 1.0]),
+        loss_cls=dict(
+            type='CrossEntropyLoss', use_sigmoid=True, loss_weight=1.0),
+        loss_bbox=dict(type='L1Loss', loss_weight=1.0)),
+    roi_head=dict(
+        type='StandardRoIHead',
+        bbox_roi_extractor=dict(
+            type='SingleRoIExtractor',
+            roi_layer=dict(type='RoIAlign', output_size=7, sampling_ratio=0),
+            out_channels=256,
+            featmap_strides=[4, 8, 16, 32]),
+        bbox_head=dict(
+            type='Shared2FCBBoxHead',
+            in_channels=256,
+            fc_out_channels=1024,
+            roi_feat_size=7,
+            num_classes=1203,
+            bbox_coder=dict(
+                type='DeltaXYWHBBoxCoder',
+                target_means=[0.0, 0.0, 0.0, 0.0],
+                target_stds=[0.1, 0.1, 0.2, 0.2]),
+            reg_class_agnostic=False,
+            loss_cls=dict(
+                type='IIFLoss',
+                use_sigmoid=False,
+                loss_weight=1.0,
+                variant='raw'),
+            loss_bbox=dict(type='L1Loss', loss_weight=1.0),
+            init_cfg=dict(
+                type='Constant',
+                val=0.001,
+                bias=0.0,
+                override=dict(name='fc_cls'))),
+        mask_roi_extractor=dict(
+            type='SingleRoIExtractor',
+            roi_layer=dict(type='RoIAlign', output_size=14, sampling_ratio=0),
+            out_channels=256,
+            featmap_strides=[4, 8, 16, 32]),
+        mask_head=dict(
+            type='FCNMaskHead',
+            num_convs=4,
+            in_channels=256,
+            conv_out_channels=256,
+            num_classes=1203,
+            loss_mask=dict(
+                type='CrossEntropyLoss', use_mask=True, loss_weight=1.0))),
+    train_cfg=dict(
+        rpn=dict(
+            assigner=dict(
+                type='MaxIoUAssigner',
+                pos_iou_thr=0.7,
+                neg_iou_thr=0.3,
+                min_pos_iou=0.3,
+                match_low_quality=True,
+                ignore_iof_thr=-1),
+            sampler=dict(
+                type='RandomSampler',
+                num=256,
+                pos_fraction=0.5,
+                neg_pos_ub=-1,
+                add_gt_as_proposals=False),
+            allowed_border=-1,
+            pos_weight=-1,
+            debug=False),
+        rpn_proposal=dict(
+            nms_pre=2000,
+            max_per_img=1000,
+            nms=dict(type='nms', iou_threshold=0.7),
+            min_bbox_size=0),
+        rcnn=dict(
+            assigner=dict(
+                type='MaxIoUAssigner',
+                pos_iou_thr=0.5,
+                neg_iou_thr=0.5,
+                min_pos_iou=0.5,
+                match_low_quality=True,
+                ignore_iof_thr=-1),
+            sampler=dict(
+                type='RandomSampler',
+                num=512,
+                pos_fraction=0.25,
+                neg_pos_ub=-1,
+                add_gt_as_proposals=True),
+            mask_size=28,
+            pos_weight=-1,
+            debug=False)),
+    test_cfg=dict(
+        rpn=dict(
+            nms_pre=1000,
+            max_per_img=1000,
+            nms=dict(type='nms', iou_threshold=0.7),
+            min_bbox_size=0),
+        rcnn=dict(
+            score_thr=0.0001,
+            nms=dict(type='nms', iou_threshold=0.5),
+            max_per_img=300,
+            mask_thr_binary=0.5)))
+dataset_type = 'LVISV1Dataset'
+data_root = '../../../../object_detection/datasets/coco/'
+img_norm_cfg = dict(
+    mean=[123.675, 116.28, 103.53], std=[58.395, 57.12, 57.375], to_rgb=True)
+train_pipeline = [
+    dict(type='LoadImageFromFile'),
+    dict(type='LoadAnnotations', with_bbox=True, with_mask=True),
+    dict(
+        type='Resize',
+        img_scale=[(1333, 640), (1333, 672), (1333, 704), (1333, 736),
+                   (1333, 768), (1333, 800)],
+        multiscale_mode='value',
+        keep_ratio=True),
+    dict(type='RandomFlip', flip_ratio=0.5),
+    dict(
+        type='Normalize',
+        mean=[123.675, 116.28, 103.53],
+        std=[58.395, 57.12, 57.375],
+        to_rgb=True),
+    dict(type='Pad', size_divisor=32),
+    dict(type='DefaultFormatBundle'),
+    dict(type='Collect', keys=['img', 'gt_bboxes', 'gt_labels', 'gt_masks'])
+]
+test_pipeline = [
+    dict(type='LoadImageFromFile'),
+    dict(
+        type='MultiScaleFlipAug',
+        img_scale=(1333, 800),
+        flip=False,
+        transforms=[
+            dict(type='Resize', keep_ratio=True),
+            dict(type='RandomFlip'),
+            dict(
+                type='Normalize',
+                mean=[123.675, 116.28, 103.53],
+                std=[58.395, 57.12, 57.375],
+                to_rgb=True),
+            dict(type='Pad', size_divisor=32),
+            dict(type='ImageToTensor', keys=['img']),
+            dict(type='Collect', keys=['img'])
+        ])
+]
+data = dict(
+    samples_per_gpu=4,
+    workers_per_gpu=4,
+    train=dict(
+        type='ClassBalancedDataset',
+        oversample_thr=0.0,
+        dataset=dict(
+            type='LVISV1Dataset',
+            ann_file=
+            '../../../../object_detection/datasets/coco/annotations/lvis_v1_train.json',
+            img_prefix='../../../../object_detection/datasets/coco/',
+            pipeline=[
+                dict(type='LoadImageFromFile'),
+                dict(type='LoadAnnotations', with_bbox=True, with_mask=True),
+                dict(
+                    type='Resize',
+                    img_scale=[(1333, 640), (1333, 672), (1333, 704),
+                               (1333, 736), (1333, 768), (1333, 800)],
+                    multiscale_mode='value',
+                    keep_ratio=True),
+                dict(type='RandomFlip', flip_ratio=0.5),
+                dict(
+                    type='Normalize',
+                    mean=[123.675, 116.28, 103.53],
+                    std=[58.395, 57.12, 57.375],
+                    to_rgb=True),
+                dict(type='Pad', size_divisor=32),
+                dict(type='DefaultFormatBundle'),
+                dict(
+                    type='Collect',
+                    keys=['img', 'gt_bboxes', 'gt_labels', 'gt_masks'])
+            ])),
+    val=dict(
+        type='LVISV1Dataset',
+        ann_file=
+        '../../../../object_detection/datasets/coco/annotations/lvis_v1_val.json',
+        img_prefix='../../../../object_detection/datasets/coco/',
+        pipeline=[
+            dict(type='LoadImageFromFile'),
+            dict(
+                type='MultiScaleFlipAug',
+                img_scale=(1333, 800),
+                flip=False,
+                transforms=[
+                    dict(type='Resize', keep_ratio=True),
+                    dict(type='RandomFlip'),
+                    dict(
+                        type='Normalize',
+                        mean=[123.675, 116.28, 103.53],
+                        std=[58.395, 57.12, 57.375],
+                        to_rgb=True),
+                    dict(type='Pad', size_divisor=32),
+                    dict(type='ImageToTensor', keys=['img']),
+                    dict(type='Collect', keys=['img'])
+                ])
+        ]),
+    test=dict(
+        type='LVISV1Dataset',
+        ann_file=
+        '../../../../object_detection/datasets/coco/annotations/lvis_v1_val.json',
+        img_prefix='../../../../object_detection/datasets/coco/',
+        pipeline=[
+            dict(type='LoadImageFromFile'),
+            dict(
+                type='MultiScaleFlipAug',
+                img_scale=(1333, 800),
+                flip=False,
+                transforms=[
+                    dict(type='Resize', keep_ratio=True),
+                    dict(type='RandomFlip'),
+                    dict(
+                        type='Normalize',
+                        mean=[123.675, 116.28, 103.53],
+                        std=[58.395, 57.12, 57.375],
+                        to_rgb=True),
+                    dict(type='Pad', size_divisor=32),
+                    dict(type='ImageToTensor', keys=['img']),
+                    dict(type='Collect', keys=['img'])
+                ])
+        ]))
+evaluation = dict(metric=['bbox', 'segm'], interval=12)
+optimizer = dict(type='SGD', lr=0.02, momentum=0.9, weight_decay=0.0001)
+optimizer_config = dict(grad_clip=None)
+lr_config = dict(
+    policy='step',
+    warmup='linear',
+    warmup_iters=500,
+    warmup_ratio=0.001,
+    step=[8, 11])
+runner = dict(type='EpochBasedRunner', max_epochs=12)
+checkpoint_config = dict(interval=1)
+log_config = dict(interval=50, hooks=[dict(type='TextLoggerHook')])
+custom_hooks = [dict(type='NumClassCheckHook')]
+dist_params = dict(backend='nccl')
+log_level = 'INFO'
+load_from = None
+resume_from = None
+workflow = [('train', 1)]
+work_dir = './experiments/iif/iif_r50_4x4_1x/'
+gpu_ids = range(0, 4)
+
+2022-08-25 18:17:19,880 - mmdet - INFO - Start running, host: konsa15@login1.bede.dur.ac.uk, work_dir: /nobackup/projects/bdliv03/workspace/image_classification/projects/iif/instance_segmentation/experiments/iif/iif_r50_4x4_1x
+2022-08-25 18:17:19,885 - mmdet - INFO - Hooks will be executed in the following order:
+before_run:
+(VERY_HIGH   ) StepLrUpdaterHook                  
+(NORMAL      ) CheckpointHook                     
+(LOW         ) DistEvalHook                       
+(VERY_LOW    ) TextLoggerHook                     
+ -------------------- 
+before_train_epoch:
+(VERY_HIGH   ) StepLrUpdaterHook                  
+(NORMAL      ) DistSamplerSeedHook                
+(NORMAL      ) NumClassCheckHook                  
+(LOW         ) IterTimerHook                      
+(LOW         ) DistEvalHook                       
+(VERY_LOW    ) TextLoggerHook                     
+ -------------------- 
+before_train_iter:
+(VERY_HIGH   ) StepLrUpdaterHook                  
+(LOW         ) IterTimerHook                      
+(LOW         ) DistEvalHook                       
+ -------------------- 
+after_train_iter:
+(ABOVE_NORMAL) OptimizerHook                      
+(NORMAL      ) CheckpointHook                     
+(LOW         ) IterTimerHook                      
+(LOW         ) DistEvalHook                       
+(VERY_LOW    ) TextLoggerHook                     
+ -------------------- 
+after_train_epoch:
+(NORMAL      ) CheckpointHook                     
+(LOW         ) DistEvalHook                       
+(VERY_LOW    ) TextLoggerHook                     
+ -------------------- 
+before_val_epoch:
+(NORMAL      ) DistSamplerSeedHook                
+(NORMAL      ) NumClassCheckHook                  
+(LOW         ) IterTimerHook                      
+(VERY_LOW    ) TextLoggerHook                     
+ -------------------- 
+before_val_iter:
+(LOW         ) IterTimerHook                      
+ -------------------- 
+after_val_iter:
+(LOW         ) IterTimerHook                      
+ -------------------- 
+after_val_epoch:
+(VERY_LOW    ) TextLoggerHook                     
+ -------------------- 
+2022-08-25 18:17:19,885 - mmdet - INFO - workflow: [('train', 1)], max: 12 epochs
+2022-08-25 18:20:12,370 - mmdet - INFO - Epoch [1][50/6213]	lr: 1.978e-03, eta: 2 days, 23:21:51, time: 3.448, data_time: 2.762, memory: 8601, loss_rpn_cls: 0.6195, loss_rpn_bbox: 0.1258, loss_cls: 5.4390, acc_classes: 94.5923, loss_bbox: 0.0734, loss_mask: 0.7146, loss: 6.9723
+2022-08-25 18:20:45,533 - mmdet - INFO - Epoch [1][100/6213]	lr: 3.976e-03, eta: 1 day, 18:31:12, time: 0.664, data_time: 0.052, memory: 8601, loss_rpn_cls: 0.3203, loss_rpn_bbox: 0.1219, loss_cls: 0.5716, acc_classes: 94.4563, loss_bbox: 0.1624, loss_mask: 0.6946, loss: 1.8708
+2022-08-25 18:21:19,617 - mmdet - INFO - Epoch [1][150/6213]	lr: 5.974e-03, eta: 1 day, 9:01:22, time: 0.681, data_time: 0.042, memory: 8601, loss_rpn_cls: 0.2523, loss_rpn_bbox: 0.1115, loss_cls: 0.5857, acc_classes: 93.7927, loss_bbox: 0.1852, loss_mask: 0.6929, loss: 1.8276
