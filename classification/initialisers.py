@@ -31,17 +31,13 @@ def get_criterion(args,dataset,model,num_classes):
             weight=get_weights(dataset)
         else:
             weight=None
-        criterion = custom.FocalLoss(gamma=0,reduction=args.reduction,feat_select=args.feat_select,weights=weight)
-        torch.nn.init.constant_(model.linear.bias.data,-6.5)
-        torch.nn.init.normal_(model.linear.weight.data,0.0,0.001)
+        criterion = custom.FocalLoss(gamma=0,reduction=args.reduction,weights=weight)
     elif (args.classif== 'focal_loss'):
         if args.deffered:
             weight=get_weights(dataset)
         else:
             weight=None
         criterion = custom.FocalLoss(gamma=args.gamma,alpha=args.alpha,reduction=args.reduction,feat_select=args.feat_select,weights=weight)
-        torch.nn.init.constant_(model.linear.bias.data,-6.5)
-        torch.nn.init.normal_(model.linear.weight.data,0.0,0.001)
     else:
         if args.deffered:
             weight=get_weights(dataset)
@@ -90,14 +86,12 @@ def get_data(args):
         num_classes = len(dataset.cls_num_list)
     elif args.dset_name =="inat18":
         num_classes = 8142
-        # auto_augment_policy = getattr(args, "auto_augment", None)
         train_txt = "../../../datasets/train_val2018/iNaturalist18_train.txt"
         eval_txt = "../../../datasets/train_val2018/iNaturalist18_val.txt"
         dataset, dataset_test, train_sampler, test_sampler = imbalanced_dataset.get_dataset_lt(args,num_classes,train_txt,eval_txt)
         num_classes = len(dataset.cls_num_list)
     elif args.dset_name =="places_lt":
         num_classes = 365
-        # auto_augment_policy = getattr(args, "auto_augment", None)
         train_txt = "../../../datasets/places365_standard/Places_LT_train.txt"
         eval_txt = "../../../datasets/places365_standard/Places_LT_test.txt"
         dataset, dataset_test, train_sampler, test_sampler = imbalanced_dataset.get_dataset_lt(args,num_classes,train_txt,eval_txt)
@@ -121,25 +115,22 @@ def get_data(args):
 
 def load_cifar(args):
     
-    if args.contrastive_learning>0:
-        transform_train = transforms.Compose([presets.SimpleAugment(args.contrastive_learning)])
+    auto_augment_policy = getattr(args, "auto_augment", None)
+
+    if auto_augment_policy=='cifar':
+        transform_train=transforms.Compose(
+                    [transforms.RandomCrop(32, padding=4), # fill parameter needs torchvision installed from source
+                     transforms.RandomHorizontalFlip(), CIFAR10Policy(), 
+                     transforms.ToTensor(), 
+                     presets.Cutout(n_holes=1, length=16), # (https://github.com/uoguelph-mlrg/Cutout/blob/master/util/cutout.py)
+                     transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))])
     else:
-        auto_augment_policy = getattr(args, "auto_augment", None)
-        
-        if auto_augment_policy=='cifar':
-            transform_train=transforms.Compose(
-                        [transforms.RandomCrop(32, padding=4), # fill parameter needs torchvision installed from source
-                         transforms.RandomHorizontalFlip(), CIFAR10Policy(), 
-                         transforms.ToTensor(), 
-                         presets.Cutout(n_holes=1, length=16), # (https://github.com/uoguelph-mlrg/Cutout/blob/master/util/cutout.py)
-                         transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))])
-        else:
-            transform_train = transforms.Compose([
-                transforms.RandomCrop(32, padding=4),
-                transforms.RandomHorizontalFlip(),
-                transforms.ToTensor(),
-                transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
-            ])
+        transform_train = transforms.Compose([
+            transforms.RandomCrop(32, padding=4),
+            transforms.RandomHorizontalFlip(),
+            transforms.ToTensor(),
+            transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
+        ])
 
 
     transform_val = transforms.Compose([
@@ -164,18 +155,6 @@ def load_cifar(args):
         if args.sampler=='random':
             train_sampler = torch.utils.data.distributed.DistributedSampler(
                 train_dataset)
-        elif args.sampler=='weighted':
-            class_weights = np.array(train_dataset.get_cls_num_list())
-
-            class_weights = (class_weights - class_weights.min()) / (class_weights.max() - class_weights.min())
-            class_weights = np.abs(class_weights-np.median(class_weights))
-            class_weights = 10**(-class_weights)
-            sample_weights = class_weights[train_dataset.targets]
-            weighted_sampler = torch.utils.data.WeightedRandomSampler(
-                weights=sample_weights,
-                num_samples=len(sample_weights),
-                replacement=True)
-            train_sampler= DistributedSamplerWrapper(weighted_sampler)
         else:
             train_labels = train_dataset.targets
             balanced_sampler = BalanceClassSampler(train_labels,mode=args.sampler)

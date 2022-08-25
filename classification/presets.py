@@ -110,13 +110,6 @@ class Augment(object):
         return tensor_samples
         
 
-def my_collate(batch):
-    target_rep = (batch[0][0].shape[0]) 
-    data = torch.cat([item[0] for item in batch],dim=0)
-    target = [item[1] for item in batch for _ in range(target_rep)]
-    target = torch.LongTensor(target)
-    return (data, target)
-
 class RandomGrayScale(object):
     def __init__(self, p=0.2):
         self.p=p

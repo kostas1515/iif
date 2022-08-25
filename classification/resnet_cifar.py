@@ -84,7 +84,6 @@ class SE_Block(nn.Module):
         
         super().__init__()
         self.squeeze = nn.AdaptiveAvgPool2d(1)
-        # self.squeeze = nn.AdaptiveMaxPool2d(1)
         self.excitation = nn.Sequential(
             nn.Linear(c, c // r, bias=False),
             nn.ReLU(inplace=True),

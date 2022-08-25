@@ -16,9 +16,6 @@ import custom
 import resnet_cifar
 import resnet_pytorch
 import numpy as np
-from sklearn.feature_selection import chi2,mutual_info_classif,f_classif
-from sklearn.feature_selection import SelectKBest
-from custom import LinearCombine
 import initialisers
 
 try:
@@ -152,22 +149,15 @@ def finetune_places(model):
 #     print(model)
     for v in model.parameters():
         v.requires_grad = False
+
+
+    torch.nn.init.xavier_uniform_(model.fc.weight)
     try:
-        torch.nn.init.xavier_uniform_(model.linear.weight)
-        model.linear.weight.requires_grad = True
-        try:
-            model.linear.bias.data.fill_(0.01)
-            model.linear.bias.requires_grad = True
-        except torch.nn.modules.module.ModuleAttributeError:
-            pass
+        model.fc.bias.requires_grad = True
+        model.fc.bias.data.fill_(0.01)
     except torch.nn.modules.module.ModuleAttributeError:
-        torch.nn.init.xavier_uniform_(model.fc.weight)
-        try:
-            model.fc.bias.requires_grad = True
-            model.fc.bias.data.fill_(0.01)
-        except torch.nn.modules.module.ModuleAttributeError:
-            pass
-        model.fc.weight.requires_grad = True
+        pass
+    model.fc.weight.requires_grad = True
     
     for v in model.layer4[-1].parameters():
         v.requires_grad = True
@@ -202,6 +192,7 @@ def main(args):
         model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
     
     criterion=initialisers.get_criterion(args,dataset,model,num_classes)
+    
 
     opt_name = args.opt.lower()
     model_parameters=model.parameters()
@@ -224,10 +215,12 @@ def main(args):
                                           opt_level=args.apex_opt_level
                                           )
 
+    if args.dset_name == 'places_lt':
+        model = finetune_places(model)
+        
     if args.decoup:
         model = select_training_param(model)
-
-    
+        
     if args.cosine_scheduler:
         lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
             optimizer,args.epochs,0)
@@ -305,10 +298,10 @@ def get_args_parser(add_help=True):
     parser.add_argument('--rand_number', default=0, type=int, help='fix random number for data sampling')
     parser.add_argument('--imb_type', default="exp", type=str, help='imbalance type')
     parser.add_argument('--imb_factor', default=0.01, type=float, help='imbalance factor')
-    parser.add_argument('--model', default='resnet18', help='model')
+    parser.add_argument('--model', default='resnet32', help='model,[resnet32,se_resnet32,resnet50,se_resnet50,resnext50_32x4d,se_resnext50_32x4d]')
     parser.add_argument('--device', default='cuda', help='device')
     parser.add_argument('-b', '--batch-size', default=32, type=int)
-    parser.add_argument('--epochs', default=90, type=int, metavar='N',
+    parser.add_argument('--epochs', default=400, type=int, metavar='N',
                         help='number of total epochs to run')
     parser.add_argument('-j', '--workers', default=4, type=int, metavar='N',
                         help='number of data loading workers (default: 16)')
@@ -319,10 +312,10 @@ def get_args_parser(add_help=True):
                         help='cosine scheduler',action='store_true')
     parser.add_argument('--momentum', default=0.9, type=float, metavar='M',
                         help='momentum')
-    parser.add_argument('--wd', '--weight-decay', default=5e-4, type=float,
-                        metavar='W', help='weight decay (default: 5e-4)',
+    parser.add_argument('--wd', '--weight-decay', default=1e-4, type=float,
+                        metavar='W', help='weight decay (default: 1e-4)',
                         dest='weight_decay')
-    parser.add_argument('--milestones',nargs='+', default=[160,180],type=int,
+    parser.add_argument('--milestones',nargs='+', default=[360,380],type=int,
                         help='decrease lr every step-size epochs')
     parser.add_argument('--lr-gamma', default=0.1, type=float,
                         help='decrease lr by a factor of lr-gamma')
@@ -333,7 +326,7 @@ def get_args_parser(add_help=True):
     parser.add_argument('--load_from', default='', help='load wweights only from checkpoint')
     parser.add_argument('--classif', default='ce',type=str, help='Type of classification')
     parser.add_argument('--classif_norm', default=None,type=str, help='Type of classifier Normalisation {None,norm,cosine')
-    parser.add_argument('--gamma', default=2.0,type=float, help='Focal loss gamma hp')
+    parser.add_argument('--gamma', default=0.0,type=float, help='Focal loss gamma hp')
     parser.add_argument('--alpha', default=None,type=float, help='Focal loss alpha hp')
     parser.add_argument('--iif', default='raw',type=str, help='Type of IIF variant- applicable if classif iif')
     parser.add_argument('--iif_norm', default=0, type=int, help='IIF norm')

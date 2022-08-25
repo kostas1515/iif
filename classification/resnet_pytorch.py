@@ -406,6 +406,7 @@ def _resnet(
     **kwargs: Any,
 ) -> ResNet:
     model = ResNet(block, layers,use_norm, **kwargs)
+    
     if pretrained!='None':
         if kwargs['num_classes']!=1000:
             model = _mismatched_classifier(model,arch,pretrained)
