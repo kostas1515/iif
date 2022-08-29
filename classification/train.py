@@ -322,7 +322,7 @@ def get_args_parser(add_help=True):
                         type=int, help='print frequency')
     parser.add_argument('--output-dir', default='.', help='path where to save')
     parser.add_argument('--resume', default='', help='resume from checkpoint')
-    parser.add_argument('--load_from', default='', help='load wweights only from checkpoint')
+    parser.add_argument('--load_from', default='', help='load weights only from checkpoint')
     parser.add_argument('--classif', default='ce',type=str, help='Type of classification')
     parser.add_argument('--classif_norm', default=None,type=str, help='Type of classifier Normalisation {None,norm,cosine')
     parser.add_argument('--gamma', default=0.0,type=float, help='Focal loss gamma hp')
@@ -357,7 +357,7 @@ def get_args_parser(add_help=True):
     parser.add_argument(
         "--pretrained",
         dest="pretrained",
-        help="Use pre-trained models from the modelzoo or local --> [pytorch, path-to-model]",
+        help="Use pre-trained models from the modelzoo or local takes either values--> [pytorch, path/to/model]",
         default=None, type=str,
     )
     parser.add_argument(
