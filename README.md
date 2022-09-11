@@ -6,7 +6,8 @@
 - [x] Training code.
 - [x] Evaluation code.
 - [x] LVIS v1.0, ImageNet-LT, Places-LT datasets.
-- [ ] Provide checkpoint models.
+- [x] Provide classification checkpoint models.
+- [ ] Provide instance segmentation checkpoint models.
 
 
 <h1> Tested with </h1>

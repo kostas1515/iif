@@ -91,10 +91,42 @@ python -m torch.distributed.launch --nproc_per_node=4 --use_env train.py --dset_
 
 ### Places-LT classifier learning with IIF
 ```
-python -m torch.distributed.launch --nproc_per_node=4 --use_env  train.py --dset_name=places_lt --data-path ../../../datasets/places365_standard/ --model se_resnet152 --output-dir ../checkpoints/places_se_r152_softmax_e30 -b 64 --reduction mean --lr 0.00002 --epochs 5 --classif_norm cosine --mixup 0.2 --auto-augment imagenet --load_from ../checkpoints/places_se_r152_softmax_e30/model_29.pth --classif iif --decoup --iif smooth
+python -m torch.distributed.launch --nproc_per_node=4 --use_env  train.py --dset_name=places_lt --data-path ../../../datasets/places365_standard/ --model se_resnet152 --output-dir ../checkpoints/places_se_r152_softmax_e30 -b 64 --reduction mean --lr 0.00002 --epochs 5 --classif_norm lr_cosine --mixup 0.2 --auto-augment randaugment --load_from ../checkpoints/places_se_r152_softmax_e30/model_29.pth --classif iif --decoup --iif smooth
 ```
 
 ### Places-LT post-process IIF
 ```
 python -m torch.distributed.launch --nproc_per_node=4 --use_env  train.py --dset_name=places_lt --data-path ../../../datasets/places365_standard/ --model se_resnet152  -b 64 --classif_norm lr_cosine --load_from ../checkpoints/places_se_r152_softmax_e30/model_29.pth --classif iif --iif smooth --test-only
 ```
+
+
+## Results and Models
+Please download the model weights and then run inference with Post-processing IIF to get the below results. 
+<table style="float: left; margin-right: 10px;">
+    <tr>
+        <th>Dataset</th>
+        <th>Backbone</th>
+        <th>top-1</th>
+        <th>Model</th>
+    </tr>
+    <tr>
+        <td>ImageNet-LT</td>
+        <td>SE-R50</td>
+        <td>55.87</td>
+        <td><a href="https://drive.google.com/file/d/1_l6HyKDfbh617XJM_pTR_spwIzJXrxkg/view?usp=sharing">weights</a></td>
+    </tr>
+    <tr>
+        <td>ImageNet-LT</td>
+        <td>SE-X50</td>
+        <td>56.21</td>
+        <td><a href="https://drive.google.com/file/d/1fYj9Hh7bjbLlaAG1KFVmLlCQB_XAQume/view?usp=sharing">weights</a></td>
+    </tr>
+        <tr>
+        <td>Places-LT</td>
+        <td>SE-R152</td>
+        <td>40.07</td>
+        <td><a href="https://drive.google.com/file/d/164CzlszBJNTZWtGRgv41j9iI3rHhzBIo/view?usp=sharing">weights</a></td>
+    </tr>
+
+</table>
+
