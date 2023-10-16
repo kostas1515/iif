@@ -1,5 +1,12 @@
 <h1> Inverse Image Frequence for Long-tailed Image Recognition </h1>
 
+<p align="center">
+  <img src="teaser.png" width="100%" title="MaskRCNN Detections">
+</p>
+<p>
+<b>Abstract</b>
+ The long-tailed distribution is a common phenomenon in the real world. Extracted large scale image datasets inevitably demonstrate the long-tailed property and models trained with imbalanced data can obtain high performance for the over-represented categories, but struggle for the under-represented categories, leading to biased predictions and performance degradation. To address this challenge, we propose a novel de-biasing method named <i>Inverse Image Frequency (IIF)</i>. IIF is a multiplicative margin adjustment transformation of the logits in the classification layer of a convolutional neural network. Our method achieves stronger performance than similar works and it is especially useful for downstream tasks such as long-tailed instance segmentation as it produces fewer false positive detections. Our extensive experiments show that IIF surpasses the state of the art on many long-tailed benchmarks such as ImageNet-LT, CIFAR-LT, Places-LT and LVIS, reaching 55.8 top-1 accuracy with ResNet50 on ImageNet-LT and 26.3 segmentation AP with MaskRCNN ResNet50 on LVIS.
+</p>
 
 ### Progress
 
