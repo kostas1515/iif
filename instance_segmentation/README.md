@@ -62,4 +62,4 @@ To reproduce the different IIF variants run:
         <td><a href="https://drive.google.com/file/d/1IwL51w9cm5Kb2L861F1fijBp-xyMLghY/view?usp=sharing">log</a>|<a href="https://drive.google.com/file/d/1A7hl4FLKOAlQKqohVN_RZ3_4RsHn4xM_/view?usp=sharing">config</a></td>
     </tr>
 </table>
-<b>Note</b><p>The ResNet_rsb log-file was tested with with mask IoU 0.5, which slightly lowers mask AP by 0.1, to get the same result like in the paper use mask IoU=0.4 during inference.</p>
+<b>Note</b><p>The ResNet_rsb log-file shows mask AP 27.3 because it was tested with mask_thr_binary=0.5, which slightly lowers mask AP by 0.1. To get the same result like in the paper use mask_thr_binary=0.4 during inference.</p>
