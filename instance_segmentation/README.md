@@ -48,8 +48,8 @@ To reproduce the different IIF variants run:
         <td>25.2</td>
         <td>30.8</td>
         <td>25.8</td>
-        <td><a href="https://www.dropbox.com/s/l76cge8hbb4s2e9/epoch_24.pth?dl=0">weights</a></td>
-        <td><a href="https://www.dropbox.com/s/o92neoc1ogopokg/20220711_074416.log?dl=0">log</a>|<a href="https://www.dropbox.com/s/n2325d7q534x6g8/droploss_normed_mask_r101_rfs_4x4_2x_gumbel.py?dl=0">config</a></td>
+        <td><a href="[https://www.dropbox.com/s/l76cge8hbb4s2e9/epoch_24.pth?dl=0](https://www.dropbox.com/scl/fi/ba2v7tb1d9lwyecesplnp/epoch_12.pth?rlkey=98vnto2dm0npu5a148b4twj4g&dl=0)">weights</a></td>
+        <td><a href="[https://www.dropbox.com/s/o92neoc1ogopokg/20220711_074416.log?dl=0](https://www.dropbox.com/scl/fi/4k6jyvblibolvcbpbwuw7/20220701_140348.log?rlkey=np2mzz3ycsnn5f4m0ge31xz66&dl=0)">log</a>|<a href="[https://www.dropbox.com/s/n2325d7q534x6g8/droploss_normed_mask_r101_rfs_4x4_2x_gumbel.py?dl=0](https://www.dropbox.com/scl/fi/iu6h25c3hmcgxwsuwe120/fasa_iof_base10_giou16_r50_rfs_cos_norm_4x4_1x_rsb.py?rlkey=su3mfo8fn7np283x88w32z08k&dl=0)">config</a></td>
     </tr>
     <tr>
         <td>IIF_r50_rsb</td>
