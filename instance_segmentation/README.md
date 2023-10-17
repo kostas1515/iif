@@ -42,22 +42,22 @@ To reproduce the different IIF variants run:
         <th>Output</th>
     </tr>
     <tr>
+        <td>IIF_r50_rsb</td>
+        <td>27.4</td>
+        <td>19.4</td>
+        <td>26.2</td>
+        <td>31.5</td>
+        <td>27.4</td>
+        <td><a href="https://www.dropbox.com/scl/fi/ba2v7tb1d9lwyecesplnp/epoch_12.pth?rlkey=98vnto2dm0npu5a148b4twj4g&dl=0">weights</a></td>
+        <td><a href="https://www.dropbox.com/scl/fi/4k6jyvblibolvcbpbwuw7/20220701_140348.log?rlkey=np2mzz3ycsnn5f4m0ge31xz66&dl=0">log</a>|<a href="https://www.dropbox.com/scl/fi/iu6h25c3hmcgxwsuwe120/fasa_iof_base10_giou16_r50_rfs_cos_norm_4x4_1x_rsb.py?rlkey=su3mfo8fn7np283x88w32z08k&dl=0">config</a></td>
+    </tr>
+    <tr>
         <td>IIF_r50</td>
         <td>26.3</td>
         <td>18.6</td>
         <td>25.2</td>
         <td>30.8</td>
         <td>25.8</td>
-        <td><a href="https://www.dropbox.com/scl/fi/ba2v7tb1d9lwyecesplnp/epoch_12.pth?rlkey=98vnto2dm0npu5a148b4twj4g&dl=0">weights</a></td>
-        <td><a href="https://www.dropbox.com/scl/fi/4k6jyvblibolvcbpbwuw7/20220701_140348.log?rlkey=np2mzz3ycsnn5f4m0ge31xz66&dl=0">log</a>|<a href="https://www.dropbox.com/scl/fi/iu6h25c3hmcgxwsuwe120/fasa_iof_base10_giou16_r50_rfs_cos_norm_4x4_1x_rsb.py?rlkey=su3mfo8fn7np283x88w32z08k&dl=0">config</a></td>
-    </tr>
-    <tr>
-        <td>IIF_r50_rsb</td>
-        <td>27.4</td>
-        <td>19.4</td>
-        <td>26.8</td>
-        <td>31.5</td>
-        <td>27.4</td>
         <td><a href="https://drive.google.com/file/d/17djufBgqYNLq3_BksTT_XDw9cIunyxaa/view?usp=sharing">weights</a></td>
         <td><a href="https://drive.google.com/file/d/1IwL51w9cm5Kb2L861F1fijBp-xyMLghY/view?usp=sharing">log</a>|<a href="https://drive.google.com/file/d/1A7hl4FLKOAlQKqohVN_RZ3_4RsHn4xM_/view?usp=sharing">config</a></td>
     </tr>
