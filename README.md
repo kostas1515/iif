@@ -14,7 +14,7 @@
 - [x] Evaluation code.
 - [x] LVIS v1.0, ImageNet-LT, Places-LT datasets.
 - [x] Provide classification checkpoint models.
-- [ ] Provide instance segmentation checkpoint models.
+- [x] Provide instance segmentation checkpoint models.
 
 
 <h1> Tested with </h1>
@@ -79,3 +79,17 @@ wget https://s3-us-west-2.amazonaws.com/dl.fbaipublicfiles.com/LVIS/lvis_v1_val.
 
 For ImageNet and Places-LT:
 1. Download the [ImageNet_2014](http://image-net.org/index) and [Places_365](http://places2.csail.mit.edu/download.html).
+
+
+## Citation
+     @article{alexandridis2023inverse,
+      title={Inverse Image Frequency for Long-tailed Image Recognition},
+      author={Alexandridis, Konstantinos Panagiotis and Luo, Shan and Nguyen, Anh and Deng, Jiankang and Zafeiriou, Stefanos},
+      journal={IEEE Transactions on Image Processing},
+      year={2023},
+      publisher={IEEE}
+    }
+
+<h1> Acknowledgements </h1>
+     This code uses the <a href='https://github.com/open-mmlab/mmdetection'>mmdet</a> framework for instance segmentation. For classification, it uses <a href='https://github.com/dvlab-research/MiSLAS'>MiSLAS</a> and <a href='https://github.com/kaidic/LDAM-DRW'>LDAM</a>. Thank you for your wonderfull work! 
+
